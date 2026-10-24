@@ -104,7 +104,7 @@ namespace
 	bool CanBuyout(CvPlayer* me, CvPlayer& minor) { return AtPeace(me, minor) && MinorAI(minor)->CanMajorBuyout(me->GetID()); }
 	bool RunBuyout(CvPlayer* me, CvPlayer& minor, const JObj&, JObj&, std::string&)
 	{
-		MinorAI(minor)->DoBuyout(me->GetID());
+		MinorAI(minor)->DoBuyout(me->GetID(), MOD_GLOBAL_CS_MARRIAGE_KEEPS_RESOURCES);
 		return true;
 	}
 	bool CanMakePeace(CvPlayer* me, CvPlayer& minor)
@@ -113,7 +113,7 @@ namespace
 	}
 	bool RunMakePeace(CvPlayer* me, CvPlayer& minor, const JObj&, JObj&, std::string&)
 	{
-		GET_TEAM(me->getTeam()).makePeace(minor.getTeam());
+		GET_TEAM(me->getTeam()).makePeace(minor.getTeam(), true, false, me->GetID());
 		return true;
 	}
 

@@ -1,5 +1,6 @@
 #include "CvGameCoreDLLPCH.h"
 #include "McpDiplomacy.h"
+#include "McpDemand.h"
 #include "McpLogText.h"
 #include "McpSeat.h"
 #include "McpBridge.h"
@@ -13,6 +14,7 @@
 #include "CvDealAI.h"
 #include "CvDiplomacyAI.h"
 #include "CvDiplomacyRequests.h"
+#include "CvDllNetMessageHandler.h"
 #include "CvNotifications.h"
 #include "McpPopups.h"
 #include "CvGlobals.h"
@@ -295,6 +297,20 @@ namespace
 	// ------------------------------------------------------------- deal building
 
 	int StandardDuration() { return GC.getGame().GetDealDuration(); }
+
+	// VMC's CvDeal(from, to) leaves these unset, and the game's deal code reads them.
+	CvDeal NewDeal(PlayerTypes eFrom, PlayerTypes eTo)
+	{
+		CvDeal deal(eFrom, eTo);
+		deal.m_ePeaceTreatyType = NO_PEACE_TREATY_TYPE;
+		deal.m_eSurrenderingPlayer = NO_PLAYER;
+		deal.m_eDemandingPlayer = NO_PLAYER;
+		deal.m_eRequestingPlayer = NO_PLAYER;
+		deal.m_iStartTurn = 0;
+		deal.m_iFinalTurn = 0;
+		deal.m_iDuration = 0;
+		return deal;
+	}
 
 	void NotifyHumanOfDeal(CvPlayer* from, CvPlayer* human)
 	{
@@ -695,8 +711,15 @@ namespace
 
 // ------------------------------------------------------------- hooks
 
+namespace
+{
+	enum DealAnswer { DEAL_ANSWER_UNREPORTED, DEAL_ANSWER_APPLIED, DEAL_ANSWER_EXPIRED };
+	DealAnswer s_eDealAnswer = DEAL_ANSWER_UNREPORTED;
+}
+
 void McpNoteDealResolved(PlayerTypes eFrom, PlayerTypes eTo, PlayerTypes eActBy, bool bAccepted, bool bStillValid)
 {
+	s_eDealAnswer = bStillValid ? DEAL_ANSWER_APPLIED : DEAL_ANSWER_EXPIRED;
 	PlayerTypes ends[2] = { eFrom, eTo };
 	for(int i = 0; i < 2; ++i)
 	{
@@ -709,6 +732,17 @@ void McpNoteDealResolved(PlayerTypes eFrom, PlayerTypes eTo, PlayerTypes eActBy,
 		else if(bAccepted) text = CivName(eOther) + " accepted " + what + "; the deal is in force";
 		else text = CivName(eOther) + " declined " + what;
 		McpBridge::Get().NotePopup(eSeat, MCP_POPUP_TEXT, 0, 0, 0, false, text, false);
+	}
+}
+
+namespace
+{
+	// McpNoteDealResolved records the answer from the DealResolved hook, which runs before ResponsePlayerDealFinalized returns.
+	DealAnswer FinalizePlayerDeal(PlayerTypes eFrom, PlayerTypes eTo, PlayerTypes eActBy, bool bAccepted)
+	{
+		s_eDealAnswer = DEAL_ANSWER_UNREPORTED;
+		CvDllNetMessageHandler().ResponsePlayerDealFinalized(eFrom, eTo, eActBy, bAccepted);
+		return s_eDealAnswer;
 	}
 }
 
@@ -749,7 +783,7 @@ namespace
 					JObj o;
 					o["from"] = J(CivName(e));
 					o["kind"] = J("human_deal_offer");
-					o["deal"] = DealJson(*pDeals->GetProposedDeal(e, eSeat));
+					o["deal"] = DealJson(*pDeals->GetProposedDeal(e, eSeat, true));
 					o["choices"] = J("answer_deal with civ and accept true or false");
 					list->push_back(JVal(o));
 				}
@@ -759,7 +793,7 @@ namespace
 				JObj o;
 				o["to"] = J(CivName(e));
 				o["kind"] = J("your_offer_awaiting_their_answer");
-				o["deal"] = DealJson(*pDeals->GetProposedDeal(eSeat, e));
+				o["deal"] = DealJson(*pDeals->GetProposedDeal(eSeat, e, true));
 				o["choices"] = J("wait, or answer_deal with civ and withdraw true");
 				list->push_back(JVal(o));
 			}
@@ -824,16 +858,23 @@ MCP_TOOL(ToolAnswerDeal)
 	if(ArgBool(args, "withdraw", false))
 	{
 		if(!pDeals->ProposedDealExists(me->GetID(), other->GetID())) { err = "you have no offer waiting with them"; return JVal(); }
-		o["deal"] = DealJson(*pDeals->GetProposedDeal(me->GetID(), other->GetID()));
-		pDeals->DoPlayerDealFinalized(me->GetID(), other->GetID(), me->GetID(), false);
+		o["deal"] = DealJson(*pDeals->GetProposedDeal(me->GetID(), other->GetID(), true));
+		FinalizePlayerDeal(me->GetID(), other->GetID(), me->GetID(), false);
 		o["ok"] = J(true);
 		o["answered"] = J("withdrawn");
 		return JVal(o);
 	}
 	if(!pDeals->ProposedDealExists(other->GetID(), me->GetID())) { err = "they have no deal waiting for your answer"; return JVal(); }
 	bool bAccept = ArgBool(args, "accept", false);
-	o["deal"] = DealJson(*pDeals->GetProposedDeal(other->GetID(), me->GetID()));
-	if(!pDeals->DoPlayerDealFinalized(other->GetID(), me->GetID(), me->GetID(), bAccept)) { err = "the deal expired: something in it is no longer available"; return JVal(); }
+	o["deal"] = DealJson(*pDeals->GetProposedDeal(other->GetID(), me->GetID(), true));
+	DealAnswer eAnswer = FinalizePlayerDeal(other->GetID(), me->GetID(), me->GetID(), bAccept);
+	if(eAnswer == DEAL_ANSWER_EXPIRED) { err = "the deal expired: something in it is no longer available"; return JVal(); }
+	if(eAnswer == DEAL_ANSWER_UNREPORTED)
+	{
+		McpDiagLog("answer_deal could not confirm the outcome: the game's DealResolved hook did not report it");
+		err = "your answer was sent, but the game did not report whether the deal went through; check diplomacy before answering again";
+		return JVal();
+	}
 	o["ok"] = J(true);
 	o["answered"] = J(bAccept ? "accepted" : "declined");
 	if(bAccept)
@@ -992,7 +1033,7 @@ MCP_TOOL(ToolDealOptions)
 	if(!me) return JVal();
 	CvPlayer* other = DealPartner(me, args, err);
 	if(!other) return JVal();
-	CvDeal deal(me->GetID(), other->GetID());
+	CvDeal deal = NewDeal(me->GetID(), other->GetID());
 	JObj o;
 	o["civilization"] = J(CivName(other->GetID()));
 	o["deal_length_turns"] = J(StandardDuration());
@@ -1009,7 +1050,7 @@ MCP_TOOL(ToolProposeDeal)
 	if(!me) return JVal();
 	CvPlayer* other = DealPartner(me, args, err);
 	if(!other) return JVal();
-	CvDeal deal(me->GetID(), other->GetID());
+	CvDeal deal = NewDeal(me->GetID(), other->GetID());
 	JObj::const_iterator g = args.find("give"), t = args.find("get");
 	if(g != args.end() && g->second.is<JArr>() && !AddItems(deal, me->GetID(), other->GetID(), g->second.get<JArr>(), err)) return JVal();
 	if(t != args.end() && t->second.is<JArr>() && !AddItems(deal, other->GetID(), me->GetID(), t->second.get<JArr>(), err)) return JVal();
@@ -1036,7 +1077,7 @@ MCP_TOOL(ToolMakePeace)
 	if(!mine.isAtWar(other->getTeam())) { err = "you are not at war with them"; return JVal(); }
 	if(!mine.canChangeWarPeace(other->getTeam())) { err = "peace is not possible in this game between you (permanent war or a game option)"; return JVal(); }
 	int dur = GC.getGame().getGameSpeedInfo().getPeaceDealDuration();
-	CvDeal deal(me->GetID(), other->GetID());
+	CvDeal deal = NewDeal(me->GetID(), other->GetID());
 	bool bPreview = ArgBool(args, "preview_only", false);
 	if(other->isHuman())
 	{
@@ -1059,7 +1100,7 @@ MCP_TOOL(ToolMakePeace)
 	}
 	// DoEqualizeDealWithHuman rebuilds a peace deal from scratch; it only needs the
 	// treaty items to recognise one, and the price it reads from the cache seeded here.
-	CvDeal valuation(me->GetID(), other->GetID());
+	CvDeal valuation = NewDeal(me->GetID(), other->GetID());
 	int iTheyGive = 0, iWeGive = 0;
 	if(eOffer > PEACE_TREATY_WHITE_PEACE)
 	{
@@ -1089,12 +1130,12 @@ MCP_TOOL(ToolDemand)
 	if(!other) return JVal();
 	if(other->isHuman()) { err = "demands only work on the game's AI; propose a deal to a human"; return JVal(); }
 	if(GET_TEAM(me->getTeam()).isAtWar(other->getTeam())) { err = "you are at war with them"; return JVal(); }
-	CvDeal deal(me->GetID(), other->GetID());
+	CvDeal deal = NewDeal(me->GetID(), other->GetID());
 	JObj::const_iterator t = args.find("get");
 	if(t == args.end() || !t->second.is<JArr>() || !AddItems(deal, other->GetID(), me->GetID(), t->second.get<JArr>(), err)) { if(err.empty()) err = "get must list what you demand"; return JVal(); }
 	if(deal.GetNumItems() == 0) { err = "the demand is empty"; return JVal(); }
 	deal.SetDemandingPlayer(me->GetID());
-	DemandResponseTypes r = other->GetDealAI()->DoHumanDemand(&deal, me->GetID());
+	DemandResponseTypes r = McpHumanDemand(*other, &deal, me->GetID());
 	JObj o;
 	o["ok"] = J(true);
 	switch(r)

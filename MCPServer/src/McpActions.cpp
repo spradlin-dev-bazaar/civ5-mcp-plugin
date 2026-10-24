@@ -32,7 +32,7 @@ MCP_TOOL(ToolPolicyOptions)
 	o["culture"] = J(me->getJONSCulture());
 	o["next_policy_cost"] = J(me->getNextPolicyCost());
 	o["free_policies"] = J(me->GetNumFreePolicies());
-	o["policies_owned"] = J(pPolicies->GetNumPoliciesOwned());
+	o["policies_owned"] = J(pPolicies->GetNumPoliciesOwned(false));
 	o["can_adopt_now"] = J(PolicyChoiceAvailable(me));
 
 	JArr branches;
@@ -323,8 +323,8 @@ MCP_TOOL(ToolDeclareWar)
 	CvTeam& myTeam = GET_TEAM(me->getTeam());
 	if(!myTeam.isHasMet(other.getTeam())) { err = "you have not met them"; return JVal(); }
 	if(myTeam.isAtWar(other.getTeam())) { err = "you are already at war with them"; return JVal(); }
-	if(!myTeam.canDeclareWar(other.getTeam())) { err = "you cannot declare war on them right now (peace treaty or other restriction)"; return JVal(); }
-	myTeam.declareWar(other.getTeam());
+	if(!myTeam.canDeclareWar(other.getTeam(), me->GetID())) { err = "you cannot declare war on them right now (peace treaty or other restriction)"; return JVal(); }
+	myTeam.declareWar(other.getTeam(), false, me->GetID());
 	JObj o;
 	o["ok"] = J(true);
 	o["at_war_with"] = J(CivName(e));

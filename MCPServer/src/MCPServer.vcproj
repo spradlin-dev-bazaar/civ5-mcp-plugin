@@ -79,6 +79,14 @@
 			>
 		</File>
 		<File
+			RelativePath=".\McpDemand.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpDemand.h"
+			>
+		</File>
+		<File
 			RelativePath=".\McpDiplomacy.cpp"
 			>
 		</File>

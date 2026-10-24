@@ -478,7 +478,7 @@ namespace McpTool
 			int iDistance = plotDistance(u->getX(), u->getY(), p->getX(), p->getY());
 			if(iDistance > u->GetRange()) { why = McpFormat("out of range: the target is %d tiles away and this unit's range is %d", iDistance, u->GetRange()); return false; }
 			if(u->getUnitInfo().IsRangeAttackOnlyInDomain() && (!p->isValidDomainForAction(*u) || u->plot()->getArea() != p->getArea())) { why = "this unit can only fire at targets on the same body of water"; return false; }
-			if(!u->IsRangeAttackIgnoreLOS() && u->getDomainType() != DOMAIN_AIR && !u->plot()->canSeePlot(p, me->getTeam(), u->GetRange(), u->getFacingDirection(true)))
+			if(!u->IsRangeAttackIgnoreLOS() && u->getDomainType() != DOMAIN_AIR && !u->plot()->canSeePlot(p, me->getTeam(), u->GetRange(), u->getFacingDirection(true), u->getDomainType()))
 			{
 				why = "no line of sight: hills, mountains, forest or jungle between this unit and the target block the view; fire from a hill or an adjacent tile, or from another angle";
 				return false;
@@ -647,7 +647,7 @@ namespace McpTool
 		o["can_found_city_here"] = J(u->canFound(u->plot()));
 		o["embarked"] = J(u->isEmbarked());
 		o["level"] = J(u->getLevel());
-		o["xp"] = J(u->getExperience());
+		o["xp"] = J(u->getExperienceTimes100() / 100);
 		if(u->isPromotionReady())
 		{
 			o["promotion_ready"] = J(true);

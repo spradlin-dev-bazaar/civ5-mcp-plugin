@@ -102,7 +102,7 @@ namespace
 		o["num_cities"] = J(other.getNumCities());
 		int iMine = me->GetMilitaryMight();
 		if(iMine > 0) o["military_strength_vs_yours"] = J((double)other.GetMilitaryMight() / (double)iMine);
-		o["can_declare_war"] = J(GET_TEAM(me->getTeam()).canDeclareWar(other.getTeam()));
+		o["can_declare_war"] = J(GET_TEAM(me->getTeam()).canDeclareWar(other.getTeam(), me->GetID()));
 		CvCity* cap = other.getCapitalCity();
 		if(cap && cap->plot()->isRevealed(me->getTeam()))
 			o["capital"] = J(McpFormat("%s at (%d,%d)", cap->getName().c_str(), cap->getX(), cap->getY()));

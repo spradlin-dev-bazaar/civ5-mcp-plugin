@@ -44,7 +44,7 @@ namespace
 	int Techs(CvPlayer& p) { return GET_TEAM(p.getTeam()).GetTeamTechs()->GetNumTechsKnown(); }
 	int CulturePerTurn(CvPlayer& p) { return p.GetTotalJONSCulturePerTurn(); }
 	int Culture(CvPlayer& p) { return p.getJONSCulture(); }
-	int Policies(CvPlayer& p) { return p.GetPlayerPolicies()->GetNumPoliciesOwned(); }
+	int Policies(CvPlayer& p) { return p.GetPlayerPolicies()->GetNumPoliciesOwned(false); }
 	int Faith(CvPlayer& p) { return p.GetFaith(); }
 	int FaithPerTurn(CvPlayer& p) { return p.GetFaithPerTurnFromCities() + p.GetFaithPerTurnFromMinorCivs() + p.GetFaithPerTurnFromReligion(); }
 	int ExcessHappiness(CvPlayer& p) { return p.GetExcessHappiness(); }

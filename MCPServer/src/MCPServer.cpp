@@ -6,7 +6,6 @@
 #include "CvDealAI.h"
 #include "CvDllPlayer.h"
 #include "CvDllPreGame.h"
-#include "CvUnit.h"
 #include "McpBridge.h"
 #include "McpDiplomacy.h"
 #include "McpLua.h"
@@ -89,16 +88,7 @@ static bool ReplaceIsDealWithHumanAcceptable(IsDealWithHumanAcceptableFn origina
 
 static void UnitOrdersCancelled(CvUnit* unit, int reason)
 {
-	if (reason != CIV_ORDERS_PROMOTION_READY)
-		McpNoteOrdersCancelled(unit, (CivOrdersCancelledReason)reason);
-}
-
-// Bazaar announces CIV_ORDERS_PROMOTION_READY after clearing the orders, and McpNoteOrdersCancelled reads them.
-static bool BeforeSetPromotionReady(CvUnit* self, bool bNewValue)
-{
-	if (bNewValue && !self->isPromotionReady())
-		McpNoteOrdersCancelled(self, CIV_ORDERS_PROMOTION_READY);
-	return false;
+	McpNoteOrdersCancelled(unit, (CivOrdersCancelledReason)reason);
 }
 
 static bool IsPluginControlledPlayer(int player)
@@ -144,7 +134,6 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 		"after CvDealAI::DoEqualizeDealWithHuman");
 	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvDealAI_IsDealWithHumanAcceptable::ID, CIV_HOOK_REPLACE, (void*)&ReplaceIsDealWithHumanAcceptable),
 		"replace CvDealAI::IsDealWithHumanAcceptable");
-	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvUnit_setPromotionReady::ID, CIV_HOOK_BEFORE, (void*)&BeforeSetPromotionReady), "before CvUnit::setPromotionReady");
 	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvLuaGame_RegisterMembers::ID, CIV_HOOK_AFTER, (void*)&McpAddGameMethods), "after CvLuaGame::RegisterMembers");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_IS_PLUGIN_CONTROLLED_PLAYER, (void*)&IsPluginControlledPlayer), "IsPluginControlledPlayer");
 	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_KEEP_DEAD_SLOT_OPEN, (void*)&KeepDeadSlotOpen), "KeepDeadSlotOpen");

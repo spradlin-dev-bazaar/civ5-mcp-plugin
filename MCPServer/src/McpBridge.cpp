@@ -493,8 +493,8 @@ void McpBridge::Impl::Shutdown()
 		jobs.clear();
 		LeaveCriticalSection(&lock);
 
-		pServer->Stop(MCP_JOB_TIMEOUT_MS + 5000);
-		delete pServer;
+		// Left allocated when a thread outlives the join; Bazaar then keeps this DLL loaded.
+		if(pServer->Stop(MCP_JOB_TIMEOUT_MS + 5000)) delete pServer;
 		pServer = NULL;
 	}
 }

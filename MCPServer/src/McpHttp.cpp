@@ -191,16 +191,16 @@ bool McpHttpServer::Start(unsigned short port, McpHttpHandler handler)
 	return true;
 }
 
-void McpHttpServer::Stop(unsigned long joinTimeoutMs)
+bool McpHttpServer::Stop(unsigned long joinTimeoutMs)
 {
-	if(m_thread == NULL) return;
+	if(m_thread == NULL) return true;
 	m_stop = true;
 	if(m_listenSocket != NO_SOCKET)
 	{
 		closesocket((SOCKET)m_listenSocket);
 		m_listenSocket = NO_SOCKET;
 	}
-	WaitForSingleObject((HANDLE)m_thread, joinTimeoutMs);
+	bool bAllStopped = WaitForSingleObject((HANDLE)m_thread, joinTimeoutMs) == WAIT_OBJECT_0;
 	CloseHandle((HANDLE)m_thread);
 	m_thread = NULL;
 
@@ -212,10 +212,11 @@ void McpHttpServer::Stop(unsigned long joinTimeoutMs)
 		if(open[i].socket != NO_SOCKET) shutdown((SOCKET)open[i].socket, SD_BOTH);
 	for(size_t i = 0; i < open.size(); ++i)
 	{
-		WaitForSingleObject((HANDLE)open[i].thread, joinTimeoutMs);
+		if(WaitForSingleObject((HANDLE)open[i].thread, joinTimeoutMs) != WAIT_OBJECT_0) bAllStopped = false;
 		CloseHandle((HANDLE)open[i].thread);
 	}
 	WSACleanup();
+	return bAllStopped;
 }
 
 unsigned long __stdcall McpHttpServer::ConnectionMain(void* arg)

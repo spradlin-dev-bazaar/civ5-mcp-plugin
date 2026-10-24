@@ -40,7 +40,8 @@ public:
 
 	// Closes the listening and any in-flight connection, then waits up to
 	// joinTimeoutMs for the thread. The handler must already be unblocked.
-	void Stop(unsigned long joinTimeoutMs);
+	// False when a thread outlived the timeout and still uses this server.
+	bool Stop(unsigned long joinTimeoutMs);
 
 	const std::string& lastError() const { return m_lastError; }
 

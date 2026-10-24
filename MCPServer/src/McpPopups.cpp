@@ -51,6 +51,17 @@ namespace
 		if(k.getExperience() > 0) s += McpFormat(" (+%d experience)", k.getExperience());
 		return s;
 	}
+
+	// With VMC's GLOBAL_CS_GIFTS option a city-state greeting's text names the gift's kind, and a unit gift's
+	// value is the unit's type (0 when none was given); without the option the value is gold.
+	std::string GiftPhrase(const std::string& kind, int iValue)
+	{
+		if(iValue <= 0) return "";
+		if(kind == "UNIT") return McpFormat(" (they gave a unit: %s)", UnitTypeName((UnitTypes)iValue));
+		std::string s = kind.empty() ? "gold" : kind;
+		for(size_t i = 0; i < s.size(); ++i) s[i] = (char)tolower((unsigned char)s[i]);
+		return McpFormat(" (they gifted %d %s)", iValue, s.c_str());
+	}
 }
 
 std::string McpDescribePopup(PlayerTypes ePlayer, int iType, int iData1, int iData2, int iData3, bool bOption1, const std::string& text)
@@ -90,7 +101,7 @@ std::string McpDescribePopup(PlayerTypes ePlayer, int iType, int iData1, int iDa
 		if(iType == BUTTONPOPUP_CITY_STATE_MESSAGE)
 			return who + ": " + text + " (their diplomacy screen is open in the game; a human must close it)";
 		std::string s = "Met the city-state of " + who;
-		if(iData2 > 0) s += McpFormat(" (they gifted %d gold)", iData2);
+		s += GiftPhrase(text, iData2);
 		return s;
 	}
 	case BUTTONPOPUP_CITY_CAPTURED:

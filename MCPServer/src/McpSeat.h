@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include "CivPluginApi.h"
 
 struct McpIdentity;
 struct McpSession;
@@ -83,11 +84,10 @@ bool McpScreenIsObserver();
 bool McpEngineSeesAsHuman(PlayerTypes e);
 
 // Game thread. Records a popup the game only shows to the player on screen, when
-// it is for a seat (or that seat's team). Same arguments as the game's popup info.
+// it is for a seat. Same arguments as the game's popup info.
 void McpNoteSeatPopup(PlayerTypes ePlayer, int iType, int iData1, int iData2, int iData3, bool bOption1, const std::string& text);
 // Game thread. Echoes a notification for a civilization a model plays into its log.
 void McpNoteSeatNotification(PlayerTypes ePlayer, const char* szMessage, const char* szSummary);
-void McpNoteSeatTeamPopup(TeamTypes eTeam, int iType, int iData1, int iData2, int iData3, bool bOption1, const std::string& text);
 // Game thread, just before the game drops a unit's queued move. A seat's model is told, as a
 // game message, that the move will not continue and why; other owners' units are ignored.
-void McpNoteOrdersCancelled(CvUnit* u, const char* szWhy);
+void McpNoteOrdersCancelled(CvUnit* u, CivOrdersCancelledReason reason);

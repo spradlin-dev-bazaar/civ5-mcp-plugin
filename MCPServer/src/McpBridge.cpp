@@ -469,7 +469,7 @@ McpBridge::Impl::Impl()
 
 McpBridge::Impl::~Impl()
 {
-	Shutdown(); // last resort if the DLL's Uninit never ran
+	Shutdown(); // last resort if CivPluginShutdown never ran
 	DeleteCriticalSection(&lock);
 }
 

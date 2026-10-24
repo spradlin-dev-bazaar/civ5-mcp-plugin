@@ -298,13 +298,31 @@ void McpNoteSeatNotification(PlayerTypes ePlayer, const char* szMessage, const c
 	McpBridge::Get().LogLineFor(ePlayer, MCP_LOG_NOTIFICATIONS, "Notification: " + text);
 }
 
-void McpNoteOrdersCancelled(CvUnit* u, const char* szWhy)
+namespace
+{
+	const char* OrdersCancelledText(CivOrdersCancelledReason reason)
+	{
+		switch(reason)
+		{
+		case CIV_ORDERS_PROMOTION_READY: return "it earned a promotion; choose one with promote_unit, then order it again";
+		case CIV_ORDERS_CANNOT_LAND: return "an air unit can no longer land there (no room, or it is out of range)";
+		case CIV_ORDERS_NO_ROUTE_TO_BUILD: return "no route can be built that way any more";
+		case CIV_ORDERS_ROUTE_BLOCKED: return "the next tile on the route can no longer be entered";
+		case CIV_ORDERS_NO_PATH: return "no path leads there any more: something now blocks every route (units, closed borders or newly seen terrain)";
+		case CIV_ORDERS_PATH_LONGER: return "the way there now takes more than two turns longer than at the start of this turn's move (something newly seen is in the way); order it again if you still want it there";
+		case CIV_ORDERS_DESTINATION_BLOCKED: return "it would end this turn on the destination, which it can no longer enter (a unit stands there, or the tile is now closed to it); order it again if you still want it there";
+		default: return "the game cancelled its orders";
+		}
+	}
+}
+
+void McpNoteOrdersCancelled(CvUnit* u, CivOrdersCancelledReason reason)
 {
 	if(!u || !McpIsSeat(u->getOwner())) return;
 	const MissionData* m = u->GetHeadMissionData();
 	if(!m || (m->eMissionType != CvTypes::getMISSION_MOVE_TO() && m->eMissionType != CvTypes::getMISSION_ROUTE_TO())) return;
 	CvUnitEntry* info = GC.getUnitInfo(u->getUnitType());
-	std::string text = McpFormat("Your %s (id %d) at (%d,%d) will not continue to (%d,%d): %s", info ? info->GetDescription() : "unit", u->GetID(), u->getX(), u->getY(), m->iData1, m->iData2, szWhy);
+	std::string text = McpFormat("Your %s (id %d) at (%d,%d) will not continue to (%d,%d): %s", info ? info->GetDescription() : "unit", u->GetID(), u->getX(), u->getY(), m->iData1, m->iData2, OrdersCancelledText(reason));
 	McpBridge::Get().NotePopup(u->getOwner(), MCP_POPUP_TEXT, 0, 0, 0, false, text, false);
 }
 
@@ -317,13 +335,6 @@ std::vector<PlayerTypes> McpTeammateSeats()
 		if(McpIsSeat(e) && McpOnScreenTeam(e) && GET_PLAYER(e).isAlive()) out.push_back(e);
 	}
 	return out;
-}
-
-void McpNoteSeatTeamPopup(TeamTypes eTeam, int iType, int iData1, int iData2, int iData3, bool bOption1, const std::string& text)
-{
-	for(int i = 0; i < MAX_MAJOR_CIVS; ++i)
-		if(McpIsSeat((PlayerTypes)i) && GET_PLAYER((PlayerTypes)i).getTeam() == eTeam)
-			McpNoteSeatPopup((PlayerTypes)i, iType, iData1, iData2, iData3, bOption1, text);
 }
 
 bool McpAnySeatAlive()

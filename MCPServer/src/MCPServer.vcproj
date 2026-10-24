@@ -115,6 +115,14 @@
 			>
 		</File>
 		<File
+			RelativePath=".\McpLua.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpLua.h"
+			>
+		</File>
+		<File
 			RelativePath=".\McpMapDraw.cpp"
 			>
 		</File>

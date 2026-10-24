@@ -1,0 +1,36 @@
+This repository contains code from four sources. The MIT licence in LICENSE covers only the last.
+
+1. Game source code from the Civilization V SDK, copyright Firaxis Games and Take-Two Interactive, all rights reserved: CvDealAI::DoHumanDemand, which MCPServer/src/McpDemand.cpp copies. It is used under the SDK's terms for making mods and is not covered by the MIT licence.
+2. whoward69's DLL-VMC: his changes to that function, in the same file. Used under his terms: it is never sold or used to make money. Not covered by the MIT licence.
+3. picojson, in MCPServer/src/picojson.h, copyright Cybozu Labs, Inc. and Kazuho Oku, under the two-clause BSD licence copied below.
+4. Everything else in this repository, written by spradlin-dev, including this project's changes to McpDemand.cpp: MIT, see LICENSE. McpDemand.cpp as a whole is still covered by 1 and 2.
+
+Because parts 1 and 2 may not be sold, the mod as a whole may not be sold either.
+
+---
+
+Copyright 2009-2010 Cybozu Labs, Inc.
+Copyright 2011-2014 Kazuho Oku
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.

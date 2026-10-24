@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Context ColorSet="Beige_Black" Font="TwCenMT14" FontStyle="Shadow">
+	<Instance Name="LineInstance">
+		<Stack ID="Root" Anchor="L,T" StackGrowth="Bottom" Padding="0">
+			<Label ID="Text" Anchor="L,T" WrapWidth="680" LeadingOffset="-5" Font="TwCenMT18" FontStyle="Shadow" ColorSet="Beige_Black_Alpha" />
+			<Stack ID="Links" Anchor="L,T" StackGrowth="Right" Padding="10" Hidden="1">
+				<Box Size="16,1" Color="0,0,0,0" />
+				<Label Anchor="L,T" String="Go to:" Font="TwCenMT14" FontStyle="Shadow" ColorSet="Beige_Black_Alpha" />
+				<TextButton ID="Link1" Anchor="L,T" Font="TwCenMT14" ColorSet="Beige_Black_Alpha" FontStyle="Shadow" MouseOverStyle="SoftShadow" ConsumeMouse="1" />
+				<TextButton ID="Link2" Anchor="L,T" Font="TwCenMT14" ColorSet="Beige_Black_Alpha" FontStyle="Shadow" MouseOverStyle="SoftShadow" ConsumeMouse="1" />
+				<TextButton ID="Link3" Anchor="L,T" Font="TwCenMT14" ColorSet="Beige_Black_Alpha" FontStyle="Shadow" MouseOverStyle="SoftShadow" ConsumeMouse="1" />
+				<TextButton ID="Link4" Anchor="L,T" Font="TwCenMT14" ColorSet="Beige_Black_Alpha" FontStyle="Shadow" MouseOverStyle="SoftShadow" ConsumeMouse="1" />
+				<TextButton ID="Link5" Anchor="L,T" Font="TwCenMT14" ColorSet="Beige_Black_Alpha" FontStyle="Shadow" MouseOverStyle="SoftShadow" ConsumeMouse="1" />
+				<TextButton ID="Link6" Anchor="L,T" Font="TwCenMT14" ColorSet="Beige_Black_Alpha" FontStyle="Shadow" MouseOverStyle="SoftShadow" ConsumeMouse="1" />
+			</Stack>
+		</Stack>
+	</Instance>
+
+	<Instance Name="FilterInstance">
+		<Box ID="Root" Anchor="L,T" Size="174,24" Color="0,0,0,0">
+			<CheckBox ID="Box" Anchor="L,C" ButtonTexture="Assets/UI/Art/Controls/CheckBox.dds" ColorLayer0="Beige" ColorLayer1="Black" TextAnchor="R,C" TextAnchorSide="O,O" Font="TwCenMT16" IsChecked="1" />
+		</Box>
+	</Instance>
+
+	<GridButton ID="OpenButton" Style="SmallButton" Size="120,28" Anchor="L,T" Offset="520,42">
+		<Label ID="OpenButtonLabel" Anchor="C,C" String="AI Log" Font="TwCenMT14" ColorSet="Beige_Black_Alpha" FontStyle="Shadow" />
+	</GridButton>
+
+	<Grid ID="Popup" Size="760,724" Anchor="R,T" Offset="20,40" Padding="0,0" Style="Grid9DetailFive140" ConsumeMouse="1" Hidden="1">
+		<Label ID="Title" Anchor="C,T" Offset="0,18" Font="TwCenMT20" FontStyle="Shadow" ColorSet="Beige_Black_Alpha" String="AI Log" />
+
+		<Stack ID="FilterStack" Anchor="L,T" Offset="34,50" StackGrowth="Right" WrapGrowth="Bottom" WrapWidth="700" />
+
+		<ScrollPanel ID="ScrollPanel" Anchor="C,T" Offset="0,164" Size="700,450" Vertical="1" AutoScrollBar="1">
+			<Stack ID="LineStack" Anchor="L,T" Offset="0,0" StackGrowth="Bottom" Padding="2" />
+			<ScrollBar Style="VertSlider" Offset="0,18" Anchor="R,T" AnchorSide="O,I" Length="414" />
+			<UpButton Style="ScrollBarUp" Offset="0,0" Anchor="R,T" AnchorSide="O,I" />
+			<DownButton Style="ScrollBarDown" Offset="0,0" Anchor="R,B" AnchorSide="O,I" />
+		</ScrollPanel>
+
+		<Box ID="ChatRow" Anchor="L,B" Offset="30,56" Size="700,28" Color="0,0,0,0" Hidden="1">
+			<PullDown ID="ChatTarget" Style="GenericPullDown" ScrollThreshold="200" SpaceForScroll="0" Size="190,28" Anchor="L,C" />
+			<Box Anchor="L,C" Offset="200,0" Size="410,26" Color="0,0,0,140">
+				<EditBox ID="ChatEntry" Size="400,22" MaxLength="500" KeepFocus="1" Anchor="L,C" Offset="5,0" Font="TwCenMT16" />
+			</Box>
+			<GridButton ID="ChatSend" Style="SmallButton" Size="80,28" Anchor="R,C">
+				<Label Anchor="C,C" String="Send" Font="TwCenMT16" ColorSet="Beige_Black_Alpha" FontStyle="Shadow" />
+			</GridButton>
+		</Box>
+
+		<GridButton ID="CloseButton" Style="SmallButton" Size="150,32" Anchor="C,B" Offset="0,16">
+			<Label Anchor="C,C" String="TXT_KEY_CLOSE" Font="TwCenMT18" ColorSet="Beige_Black_Alpha" FontStyle="Shadow" />
+		</GridButton>
+	</Grid>
+</Context>

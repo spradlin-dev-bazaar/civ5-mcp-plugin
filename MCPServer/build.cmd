@@ -7,6 +7,8 @@ if not exist "%VS90COMNTOOLS%vsvars32.bat" (echo Visual C++ 2008 was not found. 
 call "%VS90COMNTOOLS%vsvars32.bat" >nul
 vcbuild /nologo "%~dp0src\MCPServer.vcproj" "Release|Win32" || exit /b 1
 copy /y "%~dp0src\out\MCPServer.dll" "%~dp0mod\" >nul || exit /b 1
+copy /y "%~dp0..\LICENSE" "%~dp0mod\LICENSE.txt" >nul || exit /b 1
+copy /y "%~dp0..\NOTICE" "%~dp0mod\NOTICE.txt" >nul || exit /b 1
 
 set "PROJECT=%~dp0mod\MCPServer.civ5proj"
 set "MOD_NAME="

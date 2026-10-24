@@ -8,7 +8,7 @@
     <ModVersion>1</ModVersion>
     <Stability>Experimental</Stability>
     <Teaser>Runs a local MCP server so an AI model can play Civilization V.</Teaser>
-    <Description>Runs a local MCP server so an AI model can play Civilization V.</Description>
+    <Description>Runs an MCP server on this PC at http://127.0.0.1:7676/mcp. An AI model connected through an MCP client on the same PC, such as Claude Code or ChatGPT, can play your civilization, a teammate or an opponent. Adds an AI Log button that shows what it is doing. Single player only. It is a plugin for the Bazaar Multi-DLL Mod Loader, which needs Bazaar - VMC Bootstrap (required); the game won't turn this mod on without both.</Description>
     <Authors>maddachshund (spradlin-dev)</Authors>
     <SpecialThanks>
     </SpecialThanks>
@@ -50,7 +50,14 @@
         <FileName>MCPServer.sql</FileName>
       </Action>
     </ModActions>
-    <ModContent />
+    <ModContent>
+      <Content>
+        <Type>InGameUIAddin</Type>
+        <Name>AI Log</Name>
+        <Description>Shows what the AI player is doing</Description>
+        <FileName>LLMLog.xml</FileName>
+      </Content>
+    </ModContent>
     <ModProperties>
     </ModProperties>
   </PropertyGroup>
@@ -71,6 +78,22 @@
       <ImportIntoVFS>False</ImportIntoVFS>
     </Content>
     <Content Include="MCPServer.sql">
+      <SubType>Lua</SubType>
+      <ImportIntoVFS>False</ImportIntoVFS>
+    </Content>
+    <Content Include="LLMLog.lua">
+      <SubType>Lua</SubType>
+      <ImportIntoVFS>False</ImportIntoVFS>
+    </Content>
+    <Content Include="LLMLog.xml">
+      <SubType>Lua</SubType>
+      <ImportIntoVFS>False</ImportIntoVFS>
+    </Content>
+    <Content Include="LICENSE.txt">
+      <SubType>Lua</SubType>
+      <ImportIntoVFS>False</ImportIntoVFS>
+    </Content>
+    <Content Include="NOTICE.txt">
       <SubType>Lua</SubType>
       <ImportIntoVFS>False</ImportIntoVFS>
     </Content>

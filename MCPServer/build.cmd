@@ -1,7 +1,6 @@
 @echo off
 rem Builds the plugin DLL, then the mod folder in Build\ and its package in Packages\ with ModBuddy's build targets.
 setlocal
-if not defined BAZAAR_SDK set "BAZAAR_SDK=%~dp0.."
 if not exist "%BAZAAR_SDK%\CivPlugin.vsprops" (echo Set BAZAAR_SDK to the Bazaar SDK folder. & exit /b 1)
 if not exist "%VS90COMNTOOLS%vsvars32.bat" (echo Visual C++ 2008 was not found. & exit /b 1)
 call "%VS90COMNTOOLS%vsvars32.bat" >nul

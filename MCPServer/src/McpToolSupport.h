@@ -17,6 +17,8 @@ void McpDiagLog(const std::string& msg);
 // turn flag and the status tool so both agree.
 bool McpIsPlayerTurn(const CvPlayer& kPlayer);
 
+void McpResetBriefing();
+
 // Helpers shared by the tool implementation files. Everything here runs on the game thread.
 namespace McpTool
 {

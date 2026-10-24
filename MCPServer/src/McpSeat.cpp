@@ -177,7 +177,7 @@ bool McpReleaseSeat(std::string& err)
 	CvPreGame::setLeaderName(e, CvString(""));
 	CvPreGame::setHandicap(e, (HandicapTypes)GC.getAI_HANDICAP());
 	McpDropDiploRequestsFor(e);
-	bridge.SetCurrentSeat(MCP_SEAT_UNDECIDED);
+	bridge.SetCurrentSeat(MCP_SEAT_LOST);
 	return true;
 }
 

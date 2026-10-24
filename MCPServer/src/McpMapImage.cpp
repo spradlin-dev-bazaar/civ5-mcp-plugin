@@ -204,8 +204,8 @@ std::string McpRenderMapPng(PlayerTypes eMe, int cx, int cy, int radius, std::st
 				if(eCityOwner != NO_PLAYER) owners.insert(eCityOwner);
 				JObj co;
 				co["name"] = J(city->getName().c_str());
-				co["x"] = J(x);
-				co["y"] = J(y);
+				co["x"] = J(p->getX());
+				co["y"] = J(p->getY());
 				co["owner"] = J(eCityOwner != NO_PLAYER ? CivName(eCityOwner) : "unknown: it changed hands while out of sight");
 				if(h.fogged) co["out_of_sight"] = J(true);
 				cities.push_back(JVal(co));
@@ -221,8 +221,8 @@ std::string McpRenderMapPng(PlayerTypes eMe, int cx, int cy, int radius, std::st
 					if(h.units.size() >= 3)
 					{
 						++h.extraUnits;
-						uo["x"] = J(x);
-						uo["y"] = J(y);
+						uo["x"] = J(p->getX());
+						uo["y"] = J(p->getY());
 						uo["type"] = J(UnitTypeName(u->getUnitType()));
 						uo["owner"] = J(CivName(u->getOwner()));
 						uo["relation"] = J(u->getOwner() == eMe ? "yours" : u->getTeam() == eTeam ? "teammate" : myTeam.isAtWar(u->getTeam()) ? "enemy" : "other");
@@ -238,8 +238,8 @@ std::string McpRenderMapPng(PlayerTypes eMe, int cx, int cy, int radius, std::st
 					        : myTeam.isAtWar(u->getTeam()) ? Rgb(240, 40, 40)
 					        : Rgb(150, 150, 150);
 					h.units.push_back(mu);
-					uo["x"] = J(x);
-					uo["y"] = J(y);
+					uo["x"] = J(p->getX());
+					uo["y"] = J(p->getY());
 					uo["type"] = J(UnitTypeName(u->getUnitType()));
 					uo["owner"] = J(CivName(u->getOwner()));
 					uo["relation"] = J(relation);
@@ -264,7 +264,7 @@ std::string McpRenderMapPng(PlayerTypes eMe, int cx, int cy, int radius, std::st
 	std::string footer = McpFormat("center %d,%d  radius %d  hatched = out of sight now  ? = unexplored", cx, cy, radius);
 
 	std::string err;
-	std::string png = McpDrawHexMapPng(hexes, legend, footer, x0, y1, 2 * radius + 3, 2 * radius + 1, err);
+	std::string png = McpDrawHexMapPng(hexes, legend, footer, x0, y1, 2 * radius + 3, 2 * radius + 1, map.isWrapX() ? map.getGridWidth() : 0, err);
 	if(png.empty()) { summary = err; return ""; }
 	McpSaveMapCopy(png);
 	summary = McpFormat("%d tiles drawn around (%d,%d); %d of them out of sight now; %d unexplored, marked ?", (int)hexes.size() - iUnexplored, cx, cy, iFogged, iUnexplored);

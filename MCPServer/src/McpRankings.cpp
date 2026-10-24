@@ -44,7 +44,7 @@ namespace
 	int Techs(CvPlayer& p) { return GET_TEAM(p.getTeam()).GetTeamTechs()->GetNumTechsKnown(); }
 	int CulturePerTurn(CvPlayer& p) { return p.GetTotalJONSCulturePerTurn(); }
 	int Culture(CvPlayer& p) { return p.getJONSCulture(); }
-	int Policies(CvPlayer& p) { return p.GetPlayerPolicies()->GetNumPoliciesOwned(false); }
+	int Policies(CvPlayer& p) { return p.GetPlayerPolicies()->GetNumPoliciesOwned(MOD_BUGFIX_DUMMY_POLICIES); }
 	int Faith(CvPlayer& p) { return p.GetFaith(); }
 	int FaithPerTurn(CvPlayer& p) { return p.GetFaithPerTurnFromCities() + p.GetFaithPerTurnFromMinorCivs() + p.GetFaithPerTurnFromReligion(); }
 	int ExcessHappiness(CvPlayer& p) { return p.GetExcessHappiness(); }
@@ -260,7 +260,7 @@ MCP_TOOL(ToolRankings)
 	if(iTurns < 0 || iTurns > MAX_HISTORY_TURNS) { err = McpFormat("history_turns must be between 0 and %d", MAX_HISTORY_TURNS); return JVal(); }
 	std::vector<const Figure*> history;
 	JObj::const_iterator it = args.find("history_metrics");
-	if(it != args.end())
+	if(HasArg(args, "history_metrics"))
 	{
 		if(!it->second.is<JArr>()) { err = "history_metrics must be an array of names from: " + HistoryFigureNames(); return JVal(); }
 		const JArr& names = it->second.get<JArr>();

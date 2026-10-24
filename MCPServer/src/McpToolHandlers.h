@@ -14,6 +14,7 @@ MCP_TOOL(ToolUnitOptions);
 MCP_TOOL(ToolCities);
 MCP_TOOL(ToolCityOptions);
 MCP_TOOL(ToolMap);
+MCP_TOOL(ToolMapImage);
 MCP_TOOL(ToolResearchOptions);
 MCP_TOOL(ToolMoveUnit);
 MCP_TOOL(ToolUnitAction);
@@ -21,10 +22,10 @@ MCP_TOOL(ToolSetProduction);
 MCP_TOOL(ToolSetResearch);
 MCP_TOOL(ToolEndTurn);
 MCP_TOOL(ToolLog);
+MCP_TOOL(ToolChat);
 MCP_TOOL(ToolAcknowledgeMessages);
 MCP_TOOL(ToolGameSettings);
 MCP_TOOL(ToolMods);
-MCP_TOOL(ToolRankings);
 MCP_TOOL(ToolSetIdentity);
 MCP_TOOL(ToolTakeSeat);
 MCP_TOOL(ToolReleaseSeat);
@@ -43,13 +44,15 @@ MCP_TOOL(ToolPromoteUnit);
 MCP_TOOL(ToolUpgradeUnit);
 MCP_TOOL(ToolAttack);
 MCP_TOOL(ToolCityAttack);
+MCP_TOOL(ToolDeclareWar);
+
+// McpCity.cpp
 MCP_TOOL(ToolBuy);
 MCP_TOOL(ToolBuyTile);
 MCP_TOOL(ToolSetCityFocus);
 MCP_TOOL(ToolCityCitizens);
 MCP_TOOL(ToolCityWorkTile);
 MCP_TOOL(ToolCitySpecialist);
-MCP_TOOL(ToolDeclareWar);
 MCP_TOOL(ToolCityTask);
 
 // McpDiplomacy.cpp
@@ -69,6 +72,7 @@ MCP_TOOL(ToolFoundReligion);
 MCP_TOOL(ToolEnhanceReligion);
 MCP_TOOL(ToolAddReformationBelief);
 MCP_TOOL(ToolChooseGreatPerson);
+MCP_TOOL(ToolReligionOverview);
 
 // McpCongress.cpp
 MCP_TOOL(ToolCongress);
@@ -102,6 +106,6 @@ MCP_TOOL(ToolTradeRoutes);
 MCP_TOOL(ToolMilitaryOverview);
 MCP_TOOL(ToolVictoryProgress);
 MCP_TOOL(ToolKnownCities);
-MCP_TOOL(ToolMapImage);
-// McpReligion.cpp
-MCP_TOOL(ToolReligionOverview);
+
+// McpRankings.cpp
+MCP_TOOL(ToolRankings);

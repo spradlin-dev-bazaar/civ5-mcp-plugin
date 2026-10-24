@@ -92,7 +92,11 @@ namespace McpTool
 		JObj::const_iterator it = a.find(k);
 		return (it != a.end() && it->second.is<std::string>()) ? it->second.get<std::string>() : std::string();
 	}
-	bool HasArg(const JObj& a, const char* k) { return a.find(k) != a.end(); }
+	bool HasArg(const JObj& a, const char* k)
+	{
+		JObj::const_iterator it = a.find(k);
+		return it != a.end() && !it->second.is<picojson::null>();
+	}
 
 	CvPlayer* Me(std::string& err)
 	{
@@ -642,7 +646,7 @@ namespace McpTool
 			o["ranged_strength"] = J(u->GetBaseRangedCombatStrength());
 			o["range"] = J(u->GetRange());
 		}
-		o["is_combat"] = J(iStrength > 0);
+		o["is_combat"] = J(u->IsCombatUnit() || u->IsCanAttackRanged());
 		o["is_worker"] = J(u->IsWork());
 		o["can_found_city_here"] = J(u->canFound(u->plot()));
 		o["embarked"] = J(u->isEmbarked());

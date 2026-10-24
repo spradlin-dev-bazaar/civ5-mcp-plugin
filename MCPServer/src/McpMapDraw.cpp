@@ -1,8 +1,4 @@
-// Built without the game's precompiled header; see McpMapDraw.h. The standard library must
-// still be laid out exactly as that header lays it out, or the strings and vectors handed in from
-// the rest of the DLL read as garbage: these two settings are the ones it changes.
-#define _SECURE_SCL 0
-#define _HAS_ITERATOR_DEBUGGING 0
+// Built without the game's precompiled header; see McpMapDraw.h.
 #include <windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -20,8 +16,8 @@ namespace
 	using namespace Gdiplus;
 
 	// Pointy-top hexes in rows, odd rows half a hex east, as the game lays them out. At scale 1
-	// a hex is 64 pixels tall, with three label slots across the top, a unit row in the middle
-	// and the coordinates along the bottom; the drawing scales up to BASE_SCALE for legibility
+	// a hex is 64 pixels tall, with its coordinates across the top, a unit row in the middle
+	// and what is on the ground along the bottom; the drawing scales up to BASE_SCALE for legibility
 	// and back down only when a wide picture would exceed the longest edge a model is sent.
 	const float BASE_SCALE = 1.5f;
 	const int MAX_WIDTH = 1560;
@@ -35,17 +31,18 @@ namespace
 		int GridW(int cols) const { return (int)(hexW * (cols + 0.5f) + 2 * margin + rowLabels); }
 	};
 
+	bool s_gdiplusTried = false, s_gdiplusStarted = false;
+	ULONG_PTR s_gdiplusToken = 0;
+
 	bool EnsureGdiplus()
 	{
-		static bool bTried = false, bOk = false;
-		if(!bTried)
+		if(!s_gdiplusTried)
 		{
-			bTried = true;
-			static ULONG_PTR token = 0;
+			s_gdiplusTried = true;
 			GdiplusStartupInput input;
-			bOk = GdiplusStartup(&token, &input, NULL) == Ok;
+			s_gdiplusStarted = GdiplusStartup(&s_gdiplusToken, &input, NULL) == Ok;
 		}
-		return bOk;
+		return s_gdiplusStarted;
 	}
 
 	Color Rgb(unsigned rgb)
@@ -146,7 +143,7 @@ namespace
 	}
 }
 
-std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vector<McpMapLegendEntry>& legend, const std::string& footer, int x0, int y1, int cols, int rows, std::string& err)
+std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vector<McpMapLegendEntry>& legend, const std::string& footer, int x0, int y1, int cols, int rows, int wrapWidth, std::string& err)
 {
 	if(!EnsureGdiplus()) { err = "the picture could not be drawn: Windows drawing is unavailable"; return ""; }
 	float scale = BASE_SCALE;
@@ -198,7 +195,9 @@ std::string McpDrawHexMapPng(const std::vector<McpMapHex>& hexes, const std::vec
 		// The top row's x values, above its hexes; the next row down sits half a hex to the side.
 		for(int c = 0; c < cols; ++c)
 		{
-			sprintf_s(label, "x%d", x0 + c);
+			int x = x0 + c;
+			if(wrapWidth > 0) x = (x % wrapWidth + wrapWidth) % wrapWidth;
+			sprintf_s(label, "x%d", x);
 			DrawCentered(g, label, coordFont, axisColor, L.margin + L.rowLabels + L.hexW * (c + 0.5f) + ((y1 & 1) ? L.hexW / 2 : 0.0f), L.margin + 6 * s, 0);
 		}
 	}
@@ -364,4 +363,10 @@ void McpSaveMapCopy(const std::string& png)
 	std::string file = std::string(path) + "\\My Games\\Sid Meier's Civilization 5\\Logs\\map_image_last.png";
 	FILE* f = NULL;
 	if(fopen_s(&f, file.c_str(), "wb") == 0 && f) { fwrite(png.data(), 1, png.size(), f); fclose(f); }
+}
+
+void McpShutdownMapDraw()
+{
+	if(s_gdiplusStarted) GdiplusShutdown(s_gdiplusToken);
+	s_gdiplusStarted = false;
 }

@@ -273,7 +273,7 @@ namespace
 	JArr AttackTargets(CvPlayer* me, CvUnit* u)
 	{
 		JArr targets;
-		if(u->GetBaseCombatStrength() <= 0) return targets;
+		if(!u->IsCanAttack()) return targets;
 		int range = u->isRanged() ? u->GetRange() : 1;
 		for(int dy = -range; dy <= range; ++dy)
 		{
@@ -465,11 +465,12 @@ MCP_TOOL(ToolCityOptions)
 	o["faith"] = J(me->GetFaith());
 
 	JArr tiles;
-	for(int dy = -3; dy <= 3; ++dy)
+	int iBuyRange = c->getBuyPlotDistance();
+	for(int dy = -iBuyRange; dy <= iBuyRange; ++dy)
 	{
-		for(int dx = -3; dx <= 3; ++dx)
+		for(int dx = -iBuyRange; dx <= iBuyRange; ++dx)
 		{
-			CvPlot* p = plotXYWithRangeCheck(c->getX(), c->getY(), dx, dy, 3);
+			CvPlot* p = plotXYWithRangeCheck(c->getX(), c->getY(), dx, dy, iBuyRange);
 			if(!p || !c->CanBuyPlot(p->getX(), p->getY())) continue;
 			JObj t;
 			t["x"] = J(p->getX());
@@ -671,7 +672,7 @@ MCP_TOOL(ToolUnitAction)
 		if(!RequireMoves(u, err) || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
 		if(!u->canRebaseAt(p, x, y)) { err = "this unit cannot rebase there (not an aircraft, out of range, or no city or carrier of yours at the tile)"; return JVal(); }
 		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_REBASE(), x, y);
+		u->PushMission(CvTypes::getMISSION_REBASE(), x, y, 0, false, true);
 		o["ok"] = J(true);
 		o["unit"] = UnitJson(u);
 		return JVal(o);
@@ -682,7 +683,7 @@ MCP_TOOL(ToolUnitAction)
 		if(!RequireMoves(u, err) || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
 		if(!u->canAirSweepAt(x, y)) { err = "this unit cannot sweep that tile (not a fighter, out of range, or it already attacked this turn)"; return JVal(); }
 		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_AIR_SWEEP(), x, y);
+		u->PushMission(CvTypes::getMISSION_AIR_SWEEP(), x, y, 0, false, true);
 		o["ok"] = J(true);
 		o["unit"] = UnitJson(u);
 		return JVal(o);
@@ -716,7 +717,7 @@ MCP_TOOL(ToolUnitAction)
 			}
 		}
 		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_NUKE(), x, y);
+		u->PushMission(CvTypes::getMISSION_NUKE(), x, y, 0, false, true);
 		o["ok"] = J(true);
 		o["unit"] = UnitJson(u);
 		return JVal(o);
@@ -889,7 +890,7 @@ MCP_TOOL(ToolAcknowledgeMessages)
 	if(!me) return JVal();
 	std::vector<int> ids;
 	JObj::const_iterator it = args.find("ids");
-	if(it != args.end())
+	if(HasArg(args, "ids"))
 	{
 		if(!it->second.is<JArr>() || it->second.get<JArr>().empty()) { err = "ids must be a non-empty array of message ids; omit it to acknowledge every unread message"; return JVal(); }
 		const JArr& list = it->second.get<JArr>();
@@ -1093,7 +1094,7 @@ namespace
 		  "Current turn, who you are, whether it is your turn, and what blocks ending it. Cheap; call it freely.",
 		  SCHEMA_EMPTY, ToolStatus, LOG_NONE, false },
 		{ "wait_for_my_turn",
-		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (about half a minute at most; pass timeout_seconds to shorten), then returns status. Call it again if is_my_turn is still false.",
+		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 55), then returns status. Call it again if is_my_turn is still false.",
 		  "{\"type\":\"object\",\"properties\":{\"timeout_seconds\":{\"type\":\"number\"}}}", ToolStatus, LOG_NONE, true },
 		{ "briefing",
 		  "Start every turn with this: what happened since your last turn, game messages you must acknowledge, decisions waiting for you, nearby enemies, economy warnings, and a diplomacy snapshot. Optional since_turn widens the event window.",
@@ -1126,7 +1127,7 @@ namespace
 		  "How this game was set up, fixed for its whole life: start era, map type and size, difficulty, pace, victory types, every game option switched on (including ones setup mods add, such as no happiness) and the map script's own options.",
 		  SCHEMA_EMPTY, ToolGameSettings, LOG_NONE, false },
 		{ "rankings",
-		  "Where you stand, as the game's Demographics and score screens show it: your rank and the best, average and worst for population, food, production, gold, land, military, approval and literacy (best and worst are named only if you have met them); your score breakdown; and each met civilization's score. With the InfoAddict mod loaded, met civilizations also show InfoAddict's figures. history_turns (up to 100) with history_metrics adds the game's per-turn history, e.g. [\"science_per_turn\", \"military_might\"].",
+		  "Where you stand, as the game's Demographics and score screens show it: your rank and the best, average and worst for population, food, production, gold, land, military, approval and literacy (best and worst are named only if you have met them); your score breakdown; and each met civilization's score. With the InfoAddict mod loaded, met civilizations also show InfoAddict's figures. history_turns (up to 100) with history_metrics adds the game's per-turn history, e.g. [\"science_yield_per_turn\", \"military_might\"].",
 		  "{\"type\":\"object\",\"properties\":{\"history_turns\":{\"type\":\"integer\"},\"history_metrics\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}", ToolRankings, LOG_NONE, false },
 		{ "mods",
 		  "The mods loaded in this game, each with its version and the description its author wrote, so you know how the game differs from the standard rules. They can change between loads of the same game.",
@@ -1156,7 +1157,7 @@ namespace
 		  "Upgrade a unit for gold (units list upgrade_available_to and upgrade_cost). The unit keeps its position; its id changes.",
 		  SCHEMA_UNIT, ToolUpgradeUnit, LOG_UNIT, false },
 		{ "set_production",
-		  "Set what a city builds. item is a type string from city_options (UNIT_... or BUILDING_...). Replaces the current item unless append=true, which adds it to the end of the queue.",
+		  "Set what a city builds. item is a type string from city_options (UNIT_..., BUILDING_..., PROJECT_... or PROCESS_...). Replaces the current item unless append=true, which adds it to the end of the queue.",
 		  "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"},\"item\":{\"type\":\"string\"},\"append\":{\"type\":\"boolean\"}},\"required\":[\"city_id\",\"item\"]}", ToolSetProduction, LOG_CITY, false },
 		{ "buy",
 		  "Buy a unit or building in a city with gold (item type from city_options; the price is buy_gold), or with faith when with_faith=true (price buy_faith).",
@@ -1271,7 +1272,7 @@ namespace
 		  "Decide a city's fate or status: annex, puppet, raze, stop_razing or liberate (give a captured city back to its original owner).",
 		  "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"},\"task\":{\"type\":\"string\"}},\"required\":[\"city_id\",\"task\"]}", ToolCityTask, LOG_CITY, false },
 		{ "set_identity",
-		  "Name yourself; call it first on every connection. provider is your maker's product (Claude, ChatGPT, Gemini), model your model family (Opus, Fable, GPT) and version its version (5.5). The game shows it after your leader's name, e.g. Dido (Claude Opus 5.5), and on the log button.",
+		  "Name yourself; call it first on every connection. provider is your maker's product (Claude, ChatGPT, Gemini), model your model family (Opus, Fable, GPT) and version its version (5.5). The game shows it after your leader's name, e.g. Dido (Claude Opus 5.5), and, while you are the only model in the game, on the log button.",
 		  "{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\"},\"model\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"provider\",\"model\",\"version\"]}", ToolSetIdentity, LOG_TURN, false },
 		{ "take_seat",
 		  "Play a computer-controlled civilization in a shared game: it becomes a human seat for you at the human's difficulty, and the game's AI stops acting for it. The human on screen tells you which civilization, or civ=teammate or civ=opponent to have the game pick one; claim it during their turn. Also takes back a seat from status.seats_waiting_for_a_player (civ=opponent takes the one opponent seat waiting, without naming it). civ=human plays the civilization on screen instead.",
@@ -1283,7 +1284,7 @@ namespace
 		  "TESTING ONLY. Ends the turn of the human on screen as if they clicked End Turn, so a test game can run with nobody at the keyboard. Never call it in a real shared game: it ends the human's turn for them.",
 		  SCHEMA_EMPTY, ToolSkipHumanTurn, LOG_TURN, false },
 		{ "testing_mode",
-		  "TESTING ONLY. enabled=true unlocks skip_human_turn and advance_round and closes the idle human's own popups and leader screens unread, so an unattended test game does not stall. Off by default and reset every new game. Never enable it in a real shared game.",
+		  "TESTING ONLY. enabled=true unlocks skip_human_turn and advance_round and closes the idle human's own popups and leader screens unread, so an unattended test game does not stall. Off by default, and off again whenever a game is started or loaded. Never enable it in a real shared game.",
 		  "{\"type\":\"object\",\"properties\":{\"enabled\":{\"type\":\"boolean\"}}}", ToolTestingMode, LOG_TURN, false },
 		{ "log",
 		  "Write a line to the in-game log the human can read. Use it for your reasoning and plans each turn: what you see, what you decided and why.",
@@ -1295,7 +1296,7 @@ namespace
 		  "The Economic Overview screen: where gold comes from and where it goes each turn (cities, trade routes, diplomacy; unit upkeep and supply, building and improvement upkeep), and your strategic and luxury resources with totals, amounts in use and amounts available.",
 		  SCHEMA_EMPTY, ToolEconomicOverview, LOG_NONE, false },
 		{ "trade_routes",
-		  "The Trade Route Overview screen: every route of yours (origin, destination, kind, what each side earns per turn, turns left, the unit running it) and every route other civilizations run into your cities.",
+		  "The Trade Route Overview screen: every route of yours (origin, destination, kind, what it earns you per turn, turns left, the unit running it) and every route other civilizations run into your cities, with what it earns you.",
 		  SCHEMA_EMPTY, ToolTradeRoutes, LOG_NONE, false },
 		{ "military_overview",
 		  "The Military Overview screen: unit supply and where it comes from, units over supply and the production penalty, unit upkeep in gold, and every unit with its promotion choices when one is ready.",
@@ -1321,6 +1322,25 @@ const McpToolDef* McpGetTools(size_t& count)
 	return TOOLS;
 }
 
+namespace
+{
+	const char* TypeMismatch(const JVal& property, const JVal& value)
+	{
+		if(!property.is<JObj>() || value.is<picojson::null>()) return NULL;
+		JObj::const_iterator t = property.get<JObj>().find("type");
+		if(t == property.get<JObj>().end() || !t->second.is<std::string>()) return NULL;
+		const std::string& type = t->second.get<std::string>();
+		int i = 0;
+		if(type == "boolean") return value.is<bool>() ? NULL : "true or false";
+		if(type == "integer") return IsInt(value, i) ? NULL : "a whole number";
+		if(type == "number") return value.is<double>() ? NULL : "a number";
+		if(type == "string") return value.is<std::string>() ? NULL : "text";
+		if(type == "array") return value.is<JArr>() ? NULL : "a list";
+		if(type == "object") return value.is<JObj>() ? NULL : "an object";
+		return NULL;
+	}
+}
+
 std::string McpCheckArgs(const McpToolDef& tool, const picojson::object& args)
 {
 	picojson::value schema;
@@ -1332,7 +1352,13 @@ std::string McpCheckArgs(const McpToolDef& tool, const picojson::object& args)
 	if(pit != s.end() && pit->second.is<JObj>()) props = pit->second.get<JObj>();
 	for(JObj::const_iterator it = args.begin(); it != args.end(); ++it)
 	{
-		if(props.find(it->first) != props.end()) continue;
+		JObj::const_iterator prop = props.find(it->first);
+		if(prop != props.end())
+		{
+			const char* kind = TypeMismatch(prop->second, it->second);
+			if(kind) return McpFormat("argument '%s' for %s must be %s", it->first.c_str(), tool.name, kind);
+			continue;
+		}
 		std::string known;
 		for(JObj::const_iterator k = props.begin(); k != props.end(); ++k) known += (known.empty() ? "" : ", ") + k->first;
 		return McpFormat("unknown argument '%s' for %s; it accepts %s", it->first.c_str(), tool.name, known.empty() ? "no arguments" : known.c_str());
@@ -1342,7 +1368,7 @@ std::string McpCheckArgs(const McpToolDef& tool, const picojson::object& args)
 	{
 		const JArr& req = rit->second.get<JArr>();
 		for(size_t i = 0; i < req.size(); ++i)
-			if(req[i].is<std::string>() && args.find(req[i].get<std::string>()) == args.end())
+			if(req[i].is<std::string>() && !HasArg(args, req[i].get<std::string>().c_str()))
 				return McpFormat("missing required argument '%s' for %s", req[i].get<std::string>().c_str(), tool.name);
 	}
 	return "";

@@ -9,6 +9,7 @@
 #include "McpBridge.h"
 #include "McpDiplomacy.h"
 #include "McpLua.h"
+#include "McpMapDraw.h"
 #include "McpSeat.h"
 
 #include <stdarg.h>
@@ -43,6 +44,11 @@ static bool BeforeGameUpdate(CvGame* self)
 	return false;
 }
 
+static void AfterGameRead(CvGame* self, FDataStream& kStream)
+{
+	McpBridge::Get().NoteGameLoaded();
+}
+
 static void AfterDllPlayerIsHuman(const CvDllPlayer* self, bool& result)
 {
 	result = result && McpEngineSeesAsHuman(self->GetID());
@@ -63,27 +69,22 @@ static bool BeforeSendDealRequest(PlayerTypes eFrom, PlayerTypes eTo, CvDeal* pD
 	return McpInterceptDealRequest(eFrom, eTo, pDeal, eState, szMessage);
 }
 
-// VMC's DoEqualizeDealWithHuman asks IsDealWithHumanAcceptable about the player on screen, not the one the deal is with.
-static PlayerTypes s_eEqualizingWith = NO_PLAYER;
-
 static bool BeforeEqualizeDeal(CvDealAI* self, CvDeal* pDeal, PlayerTypes eOtherPlayer, bool bDontChangeMyExistingItems, bool bDontChangeTheirExistingItems, bool& bDealGoodToBeginWith, bool& bCantMatchOffer, bool& result)
 {
-	s_eEqualizingWith = eOtherPlayer;
+	McpBeginEqualizing(eOtherPlayer);
 	return false;
 }
 
 static void AfterEqualizeDeal(CvDealAI* self, CvDeal* pDeal, PlayerTypes eOtherPlayer, bool bDontChangeMyExistingItems, bool bDontChangeTheirExistingItems, bool& bDealGoodToBeginWith, bool& bCantMatchOffer, bool& result)
 {
-	s_eEqualizingWith = NO_PLAYER;
+	McpEndEqualizing();
 }
 
 typedef bool (*IsDealWithHumanAcceptableFn)(CvDealAI*, CvDeal*, PlayerTypes, int&, int&, int&, int&, int&, bool&);
 
 static bool ReplaceIsDealWithHumanAcceptable(IsDealWithHumanAcceptableFn original, CvDealAI* self, CvDeal* pDeal, PlayerTypes eOtherPlayer, int& iTotalValueToMe, int& iValueImOffering, int& iValueTheyreOffering, int& iAmountOverWeWillRequest, int& iAmountUnderWeWillOffer, bool& bCantMatchOffer)
 {
-	if (s_eEqualizingWith != NO_PLAYER)
-		eOtherPlayer = s_eEqualizingWith;
-	return original(self, pDeal, eOtherPlayer, iTotalValueToMe, iValueImOffering, iValueTheyreOffering, iAmountOverWeWillRequest, iAmountUnderWeWillOffer, bCantMatchOffer);
+	return original(self, pDeal, McpEqualizingWith(eOtherPlayer), iTotalValueToMe, iValueImOffering, iValueTheyreOffering, iAmountOverWeWillRequest, iAmountUnderWeWillOffer, bCantMatchOffer);
 }
 
 static void UnitOrdersCancelled(CvUnit* unit, int reason)
@@ -119,9 +120,12 @@ static void DealResolved(int fromPlayer, int toPlayer, int actingPlayer, bool ac
 PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin)
 {
 	s_host = host;
+	// VC++ 2008 doesn't guard a function's static, and the game and UI threads could both build it on first use.
+	McpBridge::Get();
 	plugin->name = "MCP Server for Bazaar";
 	plugin->version = "1";
 	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvGame_update::ID, CIV_HOOK_BEFORE, (void*)&BeforeGameUpdate), "before CvGame::update");
+	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvGame_Read::ID, CIV_HOOK_AFTER, (void*)&AfterGameRead), "after CvGame::Read");
 	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvDllPlayer_IsHuman::ID, CIV_HOOK_AFTER, (void*)&AfterDllPlayerIsHuman), "after CvDllPlayer::IsHuman");
 	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvDllPreGame_isHuman::ID, CIV_HOOK_AFTER, (void*)&AfterDllPreGameIsHuman), "after CvDllPreGame::isHuman");
 	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvDiplomacyRequests_SendRequest::ID, CIV_HOOK_BEFORE, (void*)&BeforeSendRequest),
@@ -147,5 +151,6 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 PLUGIN_EXPORT void CivPluginShutdown()
 {
 	McpBridge::Get().Shutdown();
+	McpShutdownMapDraw();
 	Log("shutting down");
 }

@@ -1,4 +1,5 @@
--- MCP Server for Bazaar UI add-in: the log popup (Game.GetLLMLog) and popup capture.
+-- MCP Server for Bazaar UI add-in: the AI Log window (Game.GetLLMLog) and its chat with teammate
+-- seats, popup capture, the mod list, the turn banner for seats, and tile coordinates.
 -- Every game popup is reported to the DLL (Game.LLMNotePopup). It stays open
 -- until the model acknowledges it; the DLL then names the dialog in Game.LLMDialogsToClose.
 include("InstanceManager");
@@ -34,6 +35,7 @@ local CATEGORIES = {
 
 local g_Lines = InstanceManager:new("LineInstance", "Root", Controls.LineStack);
 local g_Filters = InstanceManager:new("FilterInstance", "Root", Controls.FilterStack);
+-- Named after the earlier Local MCP Server DLL mod, so its players keep their saved filters.
 local g_Settings = Modding.OpenUserData("LocalMCPServerDLL_Log", 1);
 local g_Shown = {};
 local g_LastSeq = -1;

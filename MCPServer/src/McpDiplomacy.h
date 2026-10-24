@@ -13,6 +13,11 @@ class CvDeal;
 bool McpInterceptRequest(PlayerTypes eFrom, PlayerTypes eTo, DiploUIStateTypes eState, const char* szMessage, int iExtraGameData);
 bool McpInterceptDealRequest(PlayerTypes eFrom, PlayerTypes eTo, const CvDeal* pDeal, DiploUIStateTypes eState, const char* szMessage);
 
+// VMC's DoEqualizeDealWithHuman asks IsDealWithHumanAcceptable about the player on screen, not the one the deal is with.
+void McpBeginEqualizing(PlayerTypes eWith);
+void McpEndEqualizing();
+PlayerTypes McpEqualizingWith(PlayerTypes eAsked);
+
 // A proposed deal between humans was accepted, declined, withdrawn or expired.
 void McpNoteDealResolved(PlayerTypes eFrom, PlayerTypes eTo, PlayerTypes eActBy, bool bAccepted, bool bStillValid);
 

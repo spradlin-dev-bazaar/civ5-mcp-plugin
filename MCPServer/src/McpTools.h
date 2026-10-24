@@ -3,8 +3,6 @@
 #include <string>
 #include "picojson.h"
 
-// A tool exposed over MCP. The handler runs on the game thread; it fills error
-// (and returns any value) to report a failure to the model.
 #define MCP_TOOL_ADVANCE_ROUND "advance_round"
 #define MCP_TOOL_END_TURN "end_turn"
 #define MCP_TOOL_SKIP_HUMAN_TURN "skip_human_turn"
@@ -23,6 +21,8 @@ enum McpLogKind
 	LOG_TURN
 };
 
+// A tool exposed over MCP. The handler runs on the game thread; it fills error
+// (and returns any value) to report a failure to the model.
 struct McpToolDef
 {
 	const char* name;
@@ -35,5 +35,5 @@ struct McpToolDef
 
 const McpToolDef* McpGetTools(size_t& count);
 const McpToolDef* McpFindTool(const std::string& name);
-// "" when args match the tool's schema; otherwise the first unknown or missing argument.
+// "" when args match the tool's schema; otherwise the first unknown, mistyped or missing argument.
 std::string McpCheckArgs(const McpToolDef& tool, const picojson::object& args);

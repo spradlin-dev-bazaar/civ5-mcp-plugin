@@ -39,6 +39,7 @@ namespace
 	};
 	std::vector<DiploRequest> s_requests;
 	int s_seq = 0;
+	int s_lastRemindedTurn = -1;
 
 	// Testing only: a leader screen aimed at the idle human would block the game until someone clicks it.
 	bool DropForIdleHuman(PlayerTypes eTo)
@@ -713,6 +714,15 @@ namespace
 
 namespace
 {
+	PlayerTypes s_eEqualizingWith = NO_PLAYER;
+}
+
+void McpBeginEqualizing(PlayerTypes eWith) { s_eEqualizingWith = eWith; }
+void McpEndEqualizing() { s_eEqualizingWith = NO_PLAYER; }
+PlayerTypes McpEqualizingWith(PlayerTypes eAsked) { return s_eEqualizingWith != NO_PLAYER ? s_eEqualizingWith : eAsked; }
+
+namespace
+{
 	enum DealAnswer { DEAL_ANSWER_UNREPORTED, DEAL_ANSWER_APPLIED, DEAL_ANSWER_EXPIRED };
 	DealAnswer s_eDealAnswer = DEAL_ANSWER_UNREPORTED;
 }
@@ -730,6 +740,7 @@ void McpNoteDealResolved(PlayerTypes eFrom, PlayerTypes eTo, PlayerTypes eActBy,
 		std::string text;
 		if(!bStillValid) text = CivName(eOther) + ": " + what + " expired; something in it is no longer available";
 		else if(bAccepted) text = CivName(eOther) + " accepted " + what + "; the deal is in force";
+		else if(eActBy == eFrom) text = CivName(eOther) + " withdrew " + what;
 		else text = CivName(eOther) + " declined " + what;
 		McpBridge::Get().NotePopup(eSeat, MCP_POPUP_TEXT, 0, 0, 0, false, text, false);
 	}
@@ -865,6 +876,7 @@ MCP_TOOL(ToolAnswerDeal)
 		return JVal(o);
 	}
 	if(!pDeals->ProposedDealExists(other->GetID(), me->GetID())) { err = "they have no deal waiting for your answer"; return JVal(); }
+	if(!HasArg(args, "accept")) { err = "accept is missing: true takes their deal, false declines it (withdraw=true takes back your own offer instead)"; return JVal(); }
 	bool bAccept = ArgBool(args, "accept", false);
 	o["deal"] = DealJson(*pDeals->GetProposedDeal(other->GetID(), me->GetID(), true));
 	DealAnswer eAnswer = FinalizePlayerDeal(other->GetID(), me->GetID(), me->GetID(), bAccept);
@@ -895,6 +907,7 @@ void McpResetDiploRequests()
 	}
 	s_requests.clear();
 	s_seq = 0;
+	s_lastRemindedTurn = -1;
 }
 
 void McpDropDiploRequestsFor(PlayerTypes e)
@@ -905,12 +918,11 @@ void McpDropDiploRequestsFor(PlayerTypes e)
 
 void McpRemindHumanOfDeals()
 {
-	static int s_lastTurn = -1;
 	PlayerTypes eHuman = GC.getGame().getActivePlayer();
 	if(eHuman == NO_PLAYER || !GET_PLAYER(eHuman).isHuman() || !GET_PLAYER(eHuman).isTurnActive()) return;
 	int iTurn = GC.getGame().getGameTurn();
-	if(iTurn == s_lastTurn) return;
-	s_lastTurn = iTurn;
+	if(iTurn == s_lastRemindedTurn) return;
+	s_lastRemindedTurn = iTurn;
 	CvGameDeals* pDeals = GC.getGame().GetGameDeals();
 	for(int i = 0; i < MAX_MAJOR_CIVS; ++i)
 		if(McpIsSeat((PlayerTypes)i) && pDeals->ProposedDealExists((PlayerTypes)i, eHuman))

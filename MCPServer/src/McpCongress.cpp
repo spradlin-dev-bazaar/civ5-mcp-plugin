@@ -74,7 +74,7 @@ namespace
 	{
 		std::vector<int> choices = pLeague->GetChoicesForDecision(eDecision, me);
 		JObj::const_iterator it = args.find("choice");
-		if(it == args.end())
+		if(!HasArg(args, "choice"))
 		{
 			if(eDecision == RESOLUTION_DECISION_NONE) { out = LeagueHelpers::CHOICE_NONE; return true; }
 			err = std::string("this needs a choice: ") + DecisionName(eDecision);

@@ -108,7 +108,7 @@ std::string McpDescribePopup(PlayerTypes ePlayer, int iType, int iData1, int iDa
 	{
 		PlayerTypes eMe = ePlayer;
 		CvCity* c = (eMe != NO_PLAYER) ? GET_PLAYER(eMe).getCity(iData1) : NULL;
-		std::string s = McpFormat("Captured %s (city id %d)", c ? c->getName().c_str() : "a city", iData1);
+		std::string s = McpFormat(bOption1 ? "Acquired %s (city id %d) by buying out its city-state" : "Captured %s (city id %d)", c ? c->getName().c_str() : "a city", iData1);
 		if(iData2 > 0) s += McpFormat(", plundering %d gold", iData2);
 		if(iData3 > 0) s += McpFormat(" and %d culture", iData3);
 		s += ". Decide its fate with city_task: annex, puppet, raze";

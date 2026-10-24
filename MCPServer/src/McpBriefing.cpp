@@ -172,23 +172,17 @@ namespace
 	// reports the same changes and a new game starts clean.
 	struct UnitSnapshot
 	{
-		unsigned int gameSeed;
 		int turn;
 		std::map<int, std::string> units;
 		std::map<int, std::string> previous;
-		UnitSnapshot() : gameSeed(0), turn(-1) {}
+		UnitSnapshot() : turn(-1) {}
 	};
+	std::map<int, UnitSnapshot> s_snapshots;
 
 	void BriefingUnitChanges(CvPlayer* me, int iTurn, JObj& o)
 	{
-		static std::map<int, UnitSnapshot> s_snapshots;
 		UnitSnapshot& snap = s_snapshots[(int)me->GetID()];
-		unsigned int seed = CvPreGame::mapRandomSeed();
-		if(snap.gameSeed != seed || iTurn < snap.turn || (snap.turn >= 0 && iTurn > snap.turn + 1))
-		{
-			snap = UnitSnapshot();
-			snap.gameSeed = seed;
-		}
+		if(snap.turn >= 0 && iTurn > snap.turn + 1) snap = UnitSnapshot();
 		if(snap.turn != iTurn)
 		{
 			snap.previous.swap(snap.units);
@@ -348,6 +342,11 @@ namespace
 		econ["science_per_turn"] = J(me->GetScience());
 		return JVal(econ);
 	}
+}
+
+void McpResetBriefing()
+{
+	s_snapshots.clear();
 }
 
 MCP_TOOL(ToolBriefing)

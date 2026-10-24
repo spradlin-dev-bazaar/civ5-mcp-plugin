@@ -105,8 +105,9 @@ struct McpBridge::Impl
 		int diploSeq; // grows when a new request reaches the session's civilization
 		int diploCount;
 		bool chatWaiting; // the human's messages to the session's seat await a status
-		DWORD lastSeenMs;
-		Session() : briefingDue(true), myTurn(false), diploSeq(0), diploCount(0), chatWaiting(false), lastSeenMs(0) {}
+		DWORD lastSeenMs; // a time read before taking the lock can be older than this, and now - lastSeenMs then wraps
+		int seatBeforeLoad;
+		Session() : briefingDue(true), myTurn(false), diploSeq(0), diploCount(0), chatWaiting(false), lastSeenMs(0), seatBeforeLoad(-1) {}
 		bool Idle(DWORD now) const { return now - lastSeenMs > MCP_SESSION_IDLE_MS; }
 	};
 
@@ -126,8 +127,9 @@ struct McpBridge::Impl
 	int pendingDropped;
 	std::vector<McpPopup> popups;
 	int popupSeq;
-	std::string dialogsToClose; // newline-joined; McpLog.lua looks each name up under /InGame/
+	std::string dialogsToClose; // newline-joined; LLMLog.lua looks each name up under /InGame/
 	unsigned int gameSeed;
+	volatile bool gameLoaded;
 	std::map<int, std::vector<std::string> > chat;         // per seat: the human's messages no status has delivered yet
 	std::vector<std::pair<int, std::string> > pendingChat; // written by the UI thread, drained by Tick
 	int unreadReplies;
@@ -158,7 +160,11 @@ struct McpBridge::Impl
 
 	// any thread
 	int GetLog(std::vector<McpLogEntry>& out);
-	bool GameRunning() const { return lastTickMs != 0 && GetTickCount() - lastTickMs < MCP_GAME_IDLE_MS; }
+	bool GameRunning() const
+	{
+		DWORD last = lastTickMs;
+		return last != 0 && GetTickCount() - last < MCP_GAME_IDLE_MS;
+	}
 	void Touch(const std::string& token); // creates the session when new
 	// The session's flags; false when it no longer exists.
 	bool Flags(const std::string& token, bool& bMyTurn, int& iDiploSeq, bool& bChatWaiting, int& iSeat);
@@ -183,6 +189,7 @@ McpBridge::McpBridge() : m_pImpl(new Impl()) {}
 McpBridge::~McpBridge() { delete m_pImpl; }
 void McpBridge::Tick() { m_pImpl->Tick(); }
 void McpBridge::Shutdown() { m_pImpl->Shutdown(); }
+void McpBridge::NoteGameLoaded() { m_pImpl->gameLoaded = true; }
 
 // ---------------------------------------------------------------- sessions
 
@@ -240,15 +247,19 @@ void McpBridge::SetCurrentSeat(int seat)
 {
 	EnterCriticalSection(&m_pImpl->lock);
 	Impl::Session* s = m_pImpl->CurrentSession();
-	if(s) s->info.seat = seat;
+	if(s)
+	{
+		s->info.seat = seat;
+		s->seatBeforeLoad = -1;
+	}
 	LeaveCriticalSection(&m_pImpl->lock);
 }
 
 std::vector<McpSession> McpBridge::Sessions()
 {
 	std::vector<McpSession> out;
-	DWORD now = GetTickCount();
 	EnterCriticalSection(&m_pImpl->lock);
+	DWORD now = GetTickCount();
 	for(std::map<std::string, Impl::Session>::iterator it = m_pImpl->sessions.begin(); it != m_pImpl->sessions.end(); ++it)
 	{
 		McpSession s = it->second.info;
@@ -263,8 +274,8 @@ std::vector<McpSession> McpBridge::Sessions()
 bool McpBridge::SessionForSeat(int seat, McpSession& out)
 {
 	bool bFound = false;
-	DWORD now = GetTickCount();
 	EnterCriticalSection(&m_pImpl->lock);
+	DWORD now = GetTickCount();
 	for(std::map<std::string, Impl::Session>::iterator it = m_pImpl->sessions.begin(); it != m_pImpl->sessions.end(); ++it)
 	{
 		if(it->second.info.seat != seat || it->second.Idle(now)) continue;
@@ -281,7 +292,11 @@ void McpBridge::UnbindSeat(int seat)
 {
 	EnterCriticalSection(&m_pImpl->lock);
 	for(std::map<std::string, Impl::Session>::iterator it = m_pImpl->sessions.begin(); it != m_pImpl->sessions.end(); ++it)
-		if(it->second.info.seat == seat) it->second.info.seat = MCP_SEAT_LOST;
+		if(it->second.info.seat == seat)
+		{
+			it->second.info.seat = MCP_SEAT_LOST;
+			it->second.seatBeforeLoad = -1;
+		}
 	LeaveCriticalSection(&m_pImpl->lock);
 }
 
@@ -460,7 +475,7 @@ std::vector<McpPopup> McpBridge::GetPopupsSince(int player, int iTurn)
 // ---------------------------------------------------------------- game thread
 
 McpBridge::Impl::Impl()
-	: pServer(NULL), lastStartAttemptMs(0), startFailureShown(false), inJob(false), logSeq(0), lastLogTurn(-1), pendingDropped(0), popupSeq(0), gameSeed(0), unreadReplies(0), totalReplies(0),
+	: pServer(NULL), lastStartAttemptMs(0), startFailureShown(false), inJob(false), logSeq(0), lastLogTurn(-1), pendingDropped(0), popupSeq(0), gameSeed(0), gameLoaded(false), unreadReplies(0), totalReplies(0),
 	  gameTurn(-1), testingMode(false), shuttingDown(false), screenHumanTurn(false), hiddenPlayers(0), lastTickMs(0)
 {
 	McpInstallCrashHandler();
@@ -525,17 +540,17 @@ void McpBridge::Impl::TryStart()
 
 // Per session: drops it when its model has been silent for long; a new session in a
 // game without seats plays the screen, as the one model always did; a seat whose slot
-// is no longer a seat is lost; a lost seat comes back when a waiting seat carries the
-// model's own name (a reload of the same game); then its turn and diplomacy flags.
+// is no longer a seat is lost; a seat lost to a game load comes back when it is still waiting
+// under the model's own name; then its turn and diplomacy flags.
 void McpBridge::Impl::UpdateSessions()
 {
 	PlayerTypes eActive = GC.getGame().getActivePlayer();
 	screenHumanTurn = (eActive != NO_PLAYER) && GET_PLAYER(eActive).isHuman() && McpIsPlayerTurn(GET_PLAYER(eActive));
-	DWORD now = GetTickCount();
 	bool bAnySeat = McpAnySeat();
 	std::vector<PlayerTypes> unbound = McpUnboundSeats();
 	int iHidden = 0;
 	EnterCriticalSection(&lock);
+	DWORD now = GetTickCount();
 	for(std::map<std::string, Session>::iterator it = sessions.begin(); it != sessions.end();)
 	{
 		Session& s = it->second;
@@ -546,18 +561,21 @@ void McpBridge::Impl::UpdateSessions()
 		}
 		if(s.info.seat == MCP_SEAT_UNDECIDED && !bAnySeat) s.info.seat = MCP_SEAT_SCREEN;
 		if(s.info.seat >= 0 && !McpIsSeat((PlayerTypes)s.info.seat)) s.info.seat = MCP_SEAT_LOST;
-		if(s.info.seat == MCP_SEAT_LOST)
+		if(s.info.seat == MCP_SEAT_LOST && s.seatBeforeLoad >= 0)
 		{
-			std::string label = McpIdentityLabel(s.info.identity);
-			for(size_t i = 0; i < unbound.size(); ++i)
+			std::vector<PlayerTypes>::iterator own = std::find(unbound.begin(), unbound.end(), (PlayerTypes)s.seatBeforeLoad);
+			if(own != unbound.end() && McpSeatLabelMatches(*own, McpIdentityLabel(s.info.identity)))
 			{
-				if(!McpSeatLabelMatches(unbound[i], label)) continue;
 				for(std::map<std::string, Session>::iterator other = sessions.begin(); other != sessions.end(); ++other)
-					if(other->second.info.seat == unbound[i]) other->second.info.seat = MCP_SEAT_LOST; // an idle session of the same model
-				s.info.seat = unbound[i];
-				unbound.erase(unbound.begin() + i);
-				break;
+				{
+					if(other->second.info.seat != *own) continue;
+					other->second.info.seat = MCP_SEAT_LOST; // an idle session of the same model
+					other->second.seatBeforeLoad = -1;
+				}
+				s.info.seat = *own;
+				unbound.erase(own);
 			}
+			s.seatBeforeLoad = -1; // one try, right after the load: a later match would be a seat someone claimed since
 		}
 		if(s.info.seat >= 0 && !s.Idle(now) && !McpOnScreenTeam((PlayerTypes)s.info.seat)) ++iHidden;
 		PlayerTypes ePlayer = McpPlayerOf(s.info);
@@ -579,7 +597,7 @@ void McpBridge::Impl::Tick()
 	lastTickMs = (now == 0) ? 1 : now;
 	if(pServer == NULL) TryStart();
 	int iTurn = GC.getGame().getGameTurn();
-	if(CvPreGame::mapRandomSeed() != gameSeed || iTurn < gameTurn) ResetForNewGame();
+	if(gameLoaded || CvPreGame::mapRandomSeed() != gameSeed || iTurn < gameTurn) ResetForNewGame();
 	gameTurn = iTurn;
 	DrainChat();
 	UpdateSessions();
@@ -710,11 +728,12 @@ void McpBridge::Impl::DrainChat()
 	}
 }
 
-// Keeps pendingPopups: the UI may already have reported the new game's first popups.
-// Sessions keep their names but lose their seats: the slots belong to the new game.
+// Keeps pendingPopups: the UI may already have reported the first popups of the game just
+// started or loaded. Sessions keep their names but lose their seats: the slots belong to that game.
 void McpBridge::Impl::ResetForNewGame()
 {
 	EnterCriticalSection(&lock);
+	gameLoaded = false;
 	gameSeed = CvPreGame::mapRandomSeed();
 	popups.clear();
 	popupSeq = 0;
@@ -725,13 +744,18 @@ void McpBridge::Impl::ResetForNewGame()
 	testingMode = false;
 	for(std::map<std::string, Session>::iterator it = sessions.begin(); it != sessions.end(); ++it)
 	{
-		if(it->second.info.seat >= 0) it->second.info.seat = MCP_SEAT_LOST;
+		if(it->second.info.seat >= 0)
+		{
+			it->second.seatBeforeLoad = it->second.info.seat;
+			it->second.info.seat = MCP_SEAT_LOST;
+		}
 		it->second.diploCount = 0;
 		it->second.chatWaiting = false;
 	}
 	LeaveCriticalSection(&lock);
 	McpGameId();
 	McpResetDiploRequests();
+	McpResetBriefing();
 }
 
 namespace
@@ -769,7 +793,22 @@ bool McpBridge::Impl::RunJob(McpJob* pJob)
 	McpCrashSetContext((pJob->tool + " " + picojson::value(pJob->args).serialize()).c_str());
 	s_retryRequested = false;
 	pJob->error.clear();
-	pJob->result = pTool->handler(pJob->args, pJob->error);
+	try
+	{
+		pJob->result = pTool->handler(pJob->args, pJob->error);
+	}
+	catch(const std::exception& e)
+	{
+		McpDiagLog(pJob->tool + " threw an exception: " + e.what());
+		pJob->error = std::string("the tool stopped on an internal error (") + e.what() + "); it may have done part of its work, so check before trying again";
+		s_retryRequested = false;
+	}
+	catch(...)
+	{
+		McpDiagLog(pJob->tool + " threw an exception");
+		pJob->error = "the tool stopped on an internal error; it may have done part of its work, so check before trying again";
+		s_retryRequested = false;
+	}
 	McpCrashSetContext("");
 	bool bRetry = false;
 	if(s_retryRequested)
@@ -1150,7 +1189,7 @@ picojson::value McpBridge::Impl::RunOnGameThread(const std::string& token, const
 	}
 	if(!GameRunning())
 	{
-		error = "no game is running: the game core has not ticked recently (main menu, loading screen, or a modal dialog)";
+		error = "no game is running: the game core has not ticked recently (main menu, loading screen, a modal dialog, or Bazaar turned this plugin off after an error, which Bazaar.log records)";
 		return picojson::value();
 	}
 

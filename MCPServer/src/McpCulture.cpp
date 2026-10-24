@@ -389,7 +389,7 @@ MCP_TOOL(ToolEstablishTradeRoute)
 	if(!u->canMakeTradeRouteAt(u->plot(), x, y, eType)) { err = "that route is not possible (see trade_route_options)"; return JVal(); }
 	{
 		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_ESTABLISH_TRADE_ROUTE(), GC.getMap().plotNum(x, y), eType);
+		u->PushMission(CvTypes::getMISSION_ESTABLISH_TRADE_ROUTE(), GC.getMap().plotNum(x, y), eType, 0, false, true);
 	}
 	JObj o;
 	o["ok"] = J(true);

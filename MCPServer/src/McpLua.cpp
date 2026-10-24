@@ -8,9 +8,7 @@
 
 namespace
 {
-	//int, table, int GetLLMLog(); the table lists { Category, Text, Who, Civ } entries, oldest first, then how many AI players are hidden.
-	// seq, the lines written for the player on screen or a teammate, and how many
-	// connected models play an opponent (whose lines never reach the screen).
+	//int, table, int GetLLMLog(); seq, then the { Category, Text, Who, Civ } lines for the player on screen and its teammates, oldest first, then how many connected models play an opponent.
 	int lGetLLMLog(lua_State* L)
 	{
 		std::vector<McpLogEntry> entries;

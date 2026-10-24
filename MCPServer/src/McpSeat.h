@@ -8,7 +8,8 @@ struct McpIdentity;
 struct McpSession;
 class CvUnit;
 
-// Game thread only: reads the game's slot data without a lock.
+// Reads the game's slot data without a lock. Game thread only, except McpTeammateSeats and
+// McpSeatLabel, which the AI Log window also calls from the UI thread.
 
 // A seat is a human slot that take_seat made out of a computer slot in a single-player
 // game; several models can each hold one. A seat is never the player on screen, so the

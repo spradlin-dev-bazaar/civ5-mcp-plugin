@@ -32,7 +32,7 @@ MCP_TOOL(ToolPolicyOptions)
 	o["culture"] = J(me->getJONSCulture());
 	o["next_policy_cost"] = J(me->getNextPolicyCost());
 	o["free_policies"] = J(me->GetNumFreePolicies());
-	o["policies_owned"] = J(pPolicies->GetNumPoliciesOwned(false));
+	o["policies_owned"] = J(pPolicies->GetNumPoliciesOwned(MOD_BUGFIX_DUMMY_POLICIES));
 	o["can_adopt_now"] = J(PolicyChoiceAvailable(me));
 
 	JArr branches;

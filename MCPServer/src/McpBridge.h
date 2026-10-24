@@ -28,7 +28,7 @@ struct McpIdentity
 enum McpSeatState
 {
 	MCP_SEAT_SCREEN = -1,   // no seat: plays the civilization on screen
-	MCP_SEAT_LOST = -2,     // held a seat before the game changed under it; must claim one again
+	MCP_SEAT_LOST = -2,     // held a seat it no longer has (the game was reloaded, it released the seat, or another session took it over); must claim one again
 	MCP_SEAT_UNDECIDED = -3 // new session in a game that has seats; must choose one (or the screen)
 };
 struct McpSession
@@ -74,6 +74,10 @@ public:
 	// Game thread. Stops serving and joins the HTTP thread. Called from CivPluginShutdown;
 	// static destruction is too late (see the implementation).
 	void Shutdown();
+
+	// Game thread, from an after-hook on CvGame::Read: a save was loaded, so the next Tick starts this game's state fresh.
+	void NoteGameLoaded();
+
 	// A tool that cannot finish this frame (a unit is still animating) calls this
 	// instead of failing; the bridge runs it again on a later frame, for a few seconds.
 	static void RetryLater();
@@ -128,7 +132,7 @@ public:
 	std::string TakeDialogsToClose();
 
 	// Testing only: enables the tools that drive the idle human's turn and closes
-	// that human's popups and leader screens unread. Off by default, reset every new game.
+	// that human's popups and leader screens unread. Off by default, and off again whenever a game is started or loaded.
 	void SetTestingMode(bool bOn);
 	bool TestingMode() const;
 

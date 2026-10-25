@@ -14,7 +14,7 @@ description: Make a release of the MCP server plugin - choose the number, prepar
 - MOD, the last number, is the game's mod version. It goes up by one every release and never resets.
 - MINOR goes up when the release adds something, such as a tool or a feature.
 - MAJOR goes up when the release breaks something, such as a tool removed or renamed or an argument changed, so prompts written for the old one stop working. MINOR then goes back to 0.
-- The Bazaar line names the Bazaar release whose SDK the plugin is built against. Raise it only when the plugin needs something newer.
+- The Bazaar line names the oldest Bazaar release the plugin works with, and the SDK it is built against. Raise it whenever the plugin needs something newer, an API addition or a fix.
 
 Read `git log v<last release>..main`, then propose the number to the user.
 
@@ -23,13 +23,13 @@ Read `git log v<last release>..main`, then propose the number to the user.
 On a branch named `release-<version>`:
 
 - set the number in `VERSION`, in `MCPServer/src/McpVersion.h` and in `ModVersion` in `MCPServer/mod/MCPServer.civ5proj`;
-- if the Bazaar line changed, change the last two sentences of the civ5proj's description to match ("Built against Bazaar X. Needs Bazaar X or newer.");
+- if the Bazaar line changed, change the last sentence of the civ5proj's description to match ("Requires Bazaar X.Y.Z or newer.");
 - run `python tools/release.py check` and `python -m unittest discover -s tests`;
 - commit, push, and open a pull request to main.
 
 ## 3. Build
 
-After the pull request merges, on main with nothing uncommitted, run `python tools/release.py build`. It downloads the SDK of the Bazaar release in `VERSION`, builds from scratch, and writes the package and its debug symbols to `Build\release\<version>`.
+After the pull request merges, on main with nothing uncommitted, run `python tools/release.py build`. It downloads the SDK of the Bazaar release in `VERSION`, builds from scratch, and writes the package and its debug symbols to `Build\release\<version>`, keeping any notes.md already there.
 
 ## 4. Check in the game
 
@@ -43,7 +43,7 @@ Ask the user to install the package from `Build\release\<version>`, not from the
 
 Draft the notes in `Build\release\<version>\notes.md` and show the user the exact text. They open with the Bazaar line, then say what changed for players since the last release:
 
-    Built against Bazaar <X>. Needs Bazaar <X> or newer.
+    Requires Bazaar <X.Y.Z> or newer.
 
 The script refuses notes without that sentence.
 

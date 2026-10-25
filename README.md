@@ -4,7 +4,7 @@ A DLL Bazaar Plugin for Civilization 5 that allows an LLM with MCP functionality
 ## What you need
 
 - Civilization V with Brave New World, on Windows.
-- Bazaar, the multi-DLL mod loader, with its two mods: Bazaar Multi-DLL Mod Loader and Bazaar - VMC Bootstrap (required). Each release of this plugin says which Bazaar it was built against, and needs that Bazaar or a newer one.
+- Bazaar, the multi-DLL mod loader, with its two mods: Bazaar Multi-DLL Mod Loader and Bazaar - VMC Bootstrap (required). Each release of this plugin says which Bazaar version it requires.
 - An MCP client on the same PC, such as Claude Code.
 
 ## Installing

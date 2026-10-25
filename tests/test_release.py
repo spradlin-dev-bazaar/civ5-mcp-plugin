@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import release  # noqa: E402
 
 HEADER = '#pragma once\n#define MCP_SERVER_VERSION "0.2.3"\n'
-SENTENCE = "Built against Bazaar 0.4.0. Needs Bazaar 0.4.0 or newer."
+SENTENCE = "Requires Bazaar 0.4.0 or newer."
 PROJECT = "<ModVersion>3</ModVersion>\n<Description>Plays Civ V. %s</Description>" % SENTENCE
 VERSION = release.Version("0.2.3", "0.4.0")
 MODINFO = (
@@ -115,10 +115,13 @@ class AgreementTest(unittest.TestCase):
         self.assert_one_problem_naming("ModVersion", project=PROJECT.replace("<ModVersion>3", "<ModVersion>2"))
 
     def test_a_description_naming_another_bazaar_is_named(self):
-        self.assert_one_problem_naming("description", project=PROJECT.replace("0.4.0", "0.3.0"))
+        self.assert_one_problem_naming("description", project=PROJECT.replace("0.4", "0.3"))
 
     def test_a_description_with_half_the_sentence_is_named(self):
-        self.assert_one_problem_naming("description", project=PROJECT.replace(" Needs Bazaar 0.4.0 or newer.", ""))
+        self.assert_one_problem_naming("description", project=PROJECT.replace(" or newer", ""))
+
+    def test_the_sentence_names_the_whole_bazaar_version(self):
+        self.assertEqual(release.bazaar_sentence(release.Version("0.2.3", "0.4.2")), "Requires Bazaar 0.4.2 or newer.")
 
 
 class OrderTest(unittest.TestCase):
@@ -213,10 +216,24 @@ class PackageTest(unittest.TestCase):
         self.assert_one_problem_naming("mod version", modinfo=MODINFO.replace('version="3"', 'version="2"'))
 
     def test_a_description_naming_another_bazaar_is_named(self):
-        self.assert_one_problem_naming("Bazaar", modinfo=MODINFO.replace("0.4.0", "0.3.0"))
+        self.assert_one_problem_naming("Bazaar", modinfo=MODINFO.replace("0.4", "0.3"))
 
     def test_a_dll_built_for_another_api_is_named(self):
         self.assert_one_problem_naming("API 0.3", dll=fake_dll({"CivPluginApiVersion": struct.pack("<ii", 0, 3)}))
+
+
+class ReleaseFolderTest(unittest.TestCase):
+    def test_a_rebuild_keeps_only_the_notes(self):
+        with tempfile.TemporaryDirectory() as out:
+            for name in ("notes.md", "build.json", "MCP-Server-for-Bazaar-0.2.3.civ5mod"):
+                open(os.path.join(out, name), "w").close()
+            os.makedirs(os.path.join(out, "unpacked", "inside"))
+            release.clear_release_folder(out)
+            self.assertEqual(os.listdir(out), ["notes.md"])
+
+    def test_a_folder_that_is_not_there_is_fine(self):
+        with tempfile.TemporaryDirectory() as root:
+            release.clear_release_folder(os.path.join(root, "missing"))
 
 
 GOOD_INFO = {"commit": "abc", "clean": True, "downloaded_sdk": True}

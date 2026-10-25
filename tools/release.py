@@ -85,8 +85,8 @@ def parse_version(text):
     return Version(found.group(1), found.group(2))
 
 
-def bazaar_sentence(bazaar):
-    return "Built against Bazaar %s. Needs Bazaar %s or newer." % (bazaar, bazaar)
+def bazaar_sentence(version):
+    return "Requires Bazaar %s or newer." % version.bazaar
 
 
 def mod_name(project):
@@ -109,8 +109,8 @@ def disagreements(version, header, project):
             "MCPServer.civ5proj's ModVersion is %s, not %d" % (mod.group(1) if mod else "missing", version.mod)
         )
     description = re.search(r"<Description>(.*?)</Description>", project, re.S)
-    if not description or bazaar_sentence(version.bazaar) not in description.group(1):
-        problems.append("MCPServer.civ5proj's description does not say %r" % bazaar_sentence(version.bazaar))
+    if not description or bazaar_sentence(version) not in description.group(1):
+        problems.append("MCPServer.civ5proj's description does not say %r" % bazaar_sentence(version))
     return problems
 
 
@@ -178,8 +178,8 @@ def package_problems(folder, version):
     mod = re.search(r'<Mod [^>]*\bversion="(\d+)"', text)
     if not mod or int(mod.group(1)) != version.mod:
         problems.append("the package's mod version is %s, not %d" % (mod.group(1) if mod else "missing", version.mod))
-    if bazaar_sentence(version.bazaar) not in text:
-        problems.append("the package's description does not name Bazaar %s" % version.bazaar)
+    if bazaar_sentence(version) not in text:
+        problems.append("the package's description does not say %r" % bazaar_sentence(version))
     needed = {"LICENSE.txt", "NOTICE.txt", "MCPServer.dll"}
     needed.update(re.findall(r"<File [^>]*>([^<]+)</File>", text))
     needed.update(re.findall(r"<UpdateDatabase>([^<]+)</UpdateDatabase>", text))
@@ -237,8 +237,8 @@ def publish_problems(version, info, state, notes):
         problems.append("%s has a draft release on GitHub; publish it there, or delete it and run publish again" % tag)
     elif state.release == "published":
         problems.append("%s is already released; raise VERSION for the next release" % tag)
-    if bazaar_sentence(version.bazaar) not in notes:
-        problems.append("the notes do not say %r" % bazaar_sentence(version.bazaar))
+    if bazaar_sentence(version) not in notes:
+        problems.append("the notes do not say %r" % bazaar_sentence(version))
     return problems
 
 
@@ -332,6 +332,16 @@ def run_build_cmd(sdk, package):
         raise ReleaseError("build.cmd made no %s" % package)
 
 
+def clear_release_folder(out):
+    # The release skill drafts notes.md here, so a rebuild keeps it.
+    for name in os.listdir(out) if os.path.isdir(out) else []:
+        path = os.path.join(out, name)
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        elif name != "notes.md":
+            os.remove(path)
+
+
 def tree_state():
     return git("rev-parse", "HEAD"), git("status", "--porcelain") == ""
 
@@ -353,8 +363,7 @@ def build(sdk_folder):
         raise ReleaseError("the tree changed while building; build again")
 
     out = os.path.join(OUT, version.release)
-    if os.path.isdir(out):
-        shutil.rmtree(out)
+    clear_release_folder(out)
     unpacked = os.path.join(out, "unpacked")
     os.makedirs(unpacked)
     subprocess.run([WINDOWS_TAR, "-xf", package, "-C", unpacked], check=True)

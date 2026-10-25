@@ -11,6 +11,7 @@
 #include "McpLua.h"
 #include "McpMapDraw.h"
 #include "McpSeat.h"
+#include "McpVersion.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -123,7 +124,7 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	// VC++ 2008 doesn't guard a function's static, and the game and UI threads could both build it on first use.
 	McpBridge::Get();
 	plugin->name = "MCP Server for Bazaar";
-	plugin->version = "1";
+	plugin->version = MCP_SERVER_VERSION;
 	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvGame_update::ID, CIV_HOOK_BEFORE, (void*)&BeforeGameUpdate), "before CvGame::update");
 	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvGame_Read::ID, CIV_HOOK_AFTER, (void*)&AfterGameRead), "after CvGame::Read");
 	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvDllPlayer_IsHuman::ID, CIV_HOOK_AFTER, (void*)&AfterDllPlayerIsHuman), "after CvDllPlayer::IsHuman");

@@ -203,6 +203,10 @@
 			>
 		</File>
 		<File
+			RelativePath=".\McpVersion.h"
+			>
+		</File>
+		<File
 			RelativePath=".\picojson.h"
 			>
 		</File>

@@ -33,6 +33,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VERSION_FILE = os.path.join(REPO, "VERSION")
 VERSION_HEADER = os.path.join(REPO, "MCPServer", "src", "McpVersion.h")
 PROJECT = os.path.join(REPO, "MCPServer", "mod", "MCPServer.civ5proj")
+WORKSHOP_TEXT = os.path.join(REPO, "docs", "steam-workshop-description.txt")
 BUILD_CMD = os.path.join(REPO, "MCPServer", "build.cmd")
 BUILD_OUT = os.path.join(REPO, "MCPServer", "src", "out")
 PACKAGES = os.path.join(REPO, "MCPServer", "Packages")
@@ -102,7 +103,7 @@ def mod_name(project):
     return name.group(1)
 
 
-def disagreements(version, header, project):
+def disagreements(version, header, project, workshop):
     problems = []
     defined = re.search(r'#define MCP_SERVER_VERSION "([^"]*)"', header)
     if not defined or defined.group(1) != version.release:
@@ -117,6 +118,8 @@ def disagreements(version, header, project):
     description = re.search(r"<Description>(.*?)</Description>", project, re.S)
     if not description or bazaar_sentence(version) not in description.group(1):
         problems.append("MCPServer.civ5proj's description does not say %r" % bazaar_sentence(version))
+    if bazaar_sentence(version) not in workshop:
+        problems.append("docs\\steam-workshop-description.txt does not say %r" % bazaar_sentence(version))
     return problems
 
 
@@ -315,7 +318,7 @@ def release_tags():
 
 def check():
     version = parse_version(read_text(VERSION_FILE))
-    problems = disagreements(version, read_text(VERSION_HEADER), read_text(PROJECT))
+    problems = disagreements(version, read_text(VERSION_HEADER), read_text(PROJECT), read_text(WORKSHOP_TEXT))
     return version, problems + order_problems(version.release, release_tags())
 
 
@@ -481,7 +484,7 @@ def publish(notes_file):
         tags=release_tags(),
         missing=[os.path.basename(f) for f in files if not os.path.isfile(f)],
     )
-    problems = disagreements(version, read_text(VERSION_HEADER), project)
+    problems = disagreements(version, read_text(VERSION_HEADER), project, read_text(WORKSHOP_TEXT))
     refuse(problems + publish_problems(version, read_build_info(release_folder(version)), state, notes))
 
     title = "%s %s" % (mod_name(project), version.release)

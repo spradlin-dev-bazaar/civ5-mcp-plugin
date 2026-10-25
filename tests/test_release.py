@@ -20,6 +20,7 @@ PROJECT = (
     "<Name>MCP Server for Bazaar</Name>\n<ModVersion>3</ModVersion>\n<Description>Plays Civ V. %s</Description>"
     % (SENTENCE)
 )
+WORKSHOP = "[h1]MCP Server for Bazaar[/h1]\nPlays Civ V.\n\n%s\n" % SENTENCE
 VERSION = release.Version("0.2.3", "0.4.0")
 MODINFO = (
     """<Mod id="x" version="3">
@@ -98,18 +99,21 @@ class VersionFileTest(unittest.TestCase):
 
     def test_this_repository_agrees_with_itself(self):
         version = release.parse_version(release.read_text(release.VERSION_FILE))
-        header, project = release.read_text(release.VERSION_HEADER), release.read_text(release.PROJECT)
-        self.assertEqual(release.disagreements(version, header, project), [], "run python tools/release.py check")
+        texts = [release.read_text(p) for p in (release.VERSION_HEADER, release.PROJECT, release.WORKSHOP_TEXT)]
+        self.assertEqual(release.disagreements(version, *texts), [], "run python tools/release.py check")
 
 
 class AgreementTest(unittest.TestCase):
-    def assert_one_problem_naming(self, word, header=HEADER, project=PROJECT):
-        problems = release.disagreements(VERSION, header, project)
+    def assert_one_problem_naming(self, word, header=HEADER, project=PROJECT, workshop=WORKSHOP):
+        problems = release.disagreements(VERSION, header, project, workshop)
         self.assertEqual(len(problems), 1, problems)
         self.assertIn(word, problems[0])
 
     def test_matching_files_agree(self):
-        self.assertEqual(release.disagreements(VERSION, HEADER, PROJECT), [])
+        self.assertEqual(release.disagreements(VERSION, HEADER, PROJECT, WORKSHOP), [])
+
+    def test_a_workshop_text_naming_another_bazaar_is_named(self):
+        self.assert_one_problem_naming("steam-workshop-description.txt", workshop=WORKSHOP.replace("0.4", "0.3"))
 
     def test_a_header_that_differs_is_named(self):
         self.assert_one_problem_naming("McpVersion.h", header=HEADER.replace("0.2.3", "0.2.2"))

@@ -23,7 +23,7 @@ Fetch GitHub's tags first (`git fetch --tags --force`), then read `git log v<las
 On a branch named `release-<version>`:
 
 - set the number in `VERSION`, in `MCPServer/src/McpVersion.h` and in `ModVersion` in `MCPServer/mod/MCPServer.civ5proj`;
-- if the Bazaar line changed, change the last sentence of the civ5proj's description to match ("Requires Bazaar X.Y.Z or newer.");
+- if the Bazaar line changed, change the last sentence of the civ5proj's description, and the "Requires Bazaar" line in `docs/steam-workshop-description.txt`, to match ("Requires Bazaar X.Y.Z or newer.");
 - run `python tools/release.py check` and `python -m unittest discover -s tests`;
 - commit, push, and open a pull request to main. The user reviews and merges it on GitHub; the skill never merges.
 
@@ -53,4 +53,4 @@ The script refuses notes without that sentence.
 
 ## 7. Steam Workshop
 
-Uploading to the Workshop stays a manual step in ModBuddy, done by the user.
+Uploading to the Workshop stays a manual step in ModBuddy, done by the user. The Workshop page's text is `docs/steam-workshop-description.txt`; paste it into ModBuddy's description.

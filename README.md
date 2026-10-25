@@ -19,4 +19,4 @@ This plugin replaces the Local MCP Server DLL mod, so turn that one off.
 
 ## Making a release
 
-Run `python tools/release.py check`, then `build`, then `publish`. The steps around them are in `.claude/skills/release/SKILL.md`.
+Run `python tools/release.py check`, then `build`, then `publish --notes FILE`. Publishing needs the GitHub CLI, `gh`, logged in. The steps around them are in `.claude/skills/release/SKILL.md`.

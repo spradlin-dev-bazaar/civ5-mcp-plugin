@@ -1,4 +1,4 @@
-# build.cmd output
+# Output of build.cmd and tools/release.py, whose publish step needs a clean tree
 Build/
 Packages/
 **/src/out/

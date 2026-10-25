@@ -36,8 +36,8 @@ PROJECT = os.path.join(REPO, "MCPServer", "mod", "MCPServer.civ5proj")
 BUILD_CMD = os.path.join(REPO, "MCPServer", "build.cmd")
 BUILD_OUT = os.path.join(REPO, "MCPServer", "src", "out")
 PACKAGES = os.path.join(REPO, "MCPServer", "Packages")
-STAGING = os.path.join(REPO, "MCPServer", "Build")
 OUT = os.path.join(REPO, "Build", "release")
+PLUGIN_REPO = "spradlin-dev-bazaar/civ5-mcp-plugin"
 BAZAAR_REPO = "spradlin-dev-bazaar/civ5-bazaar"
 SDK_ASSET = "*SDK*.zip"
 # libarchive, which reads the 7z format ModBuddy's packages use; Git's tar does not.
@@ -59,6 +59,10 @@ def numbers(text):
 
 class Version(collections.namedtuple("Version", "release bazaar")):
     @property
+    def major(self):
+        return numbers(self.release)[0]
+
+    @property
     def mod(self):
         return numbers(self.release)[2]
 
@@ -67,7 +71,9 @@ class Version(collections.namedtuple("Version", "release bazaar")):
         return numbers(self.bazaar)[:2]
 
 
-PublishState = collections.namedtuple("PublishState", "branch clean head origin_head remote_tag release tags missing")
+PublishState = collections.namedtuple(
+    "PublishState", "branch clean head origin_head remote_tag github_release tags missing"
+)
 
 
 def read_text(path):
@@ -123,7 +129,10 @@ def order_problems(release, tags):
     last = released[-1]
     problems = []
     if new == last:
-        problems.append("v%s is already released; raise VERSION for the next release" % release)
+        problems.append(
+            "v%s is tagged as released; raise VERSION for the next release, or, if it was never published, "
+            "delete its tag here (git tag -d v%s) and on GitHub if it is there" % (release, release)
+        )
     elif new[2] != last[2] + 1:
         problems.append(
             "the last number, the mod version, must be %d after v%s, not %d"
@@ -170,7 +179,7 @@ def exported_api_version(data):
 
 
 def package_problems(folder, version):
-    modinfo = glob.glob(os.path.join(folder, "*.modinfo"))
+    modinfo = glob.glob(os.path.join(glob.escape(folder), "*.modinfo"))
     if len(modinfo) != 1:
         return ["the package has %d mod descriptions, not one" % len(modinfo)]
     text = read_text(modinfo[0])
@@ -180,13 +189,21 @@ def package_problems(folder, version):
         problems.append("the package's mod version is %s, not %d" % (mod.group(1) if mod else "missing", version.mod))
     if bazaar_sentence(version) not in text:
         problems.append("the package's description does not say %r" % bazaar_sentence(version))
+    if "<AffectsSavedGames>1</AffectsSavedGames>" not in text:
+        problems.append("the package's mod does not affect saved games, so a loaded save would leave it off")
+    updates = re.findall(r"<UpdateDatabase>([^<]+)</UpdateDatabase>", text)
     needed = {"LICENSE.txt", "NOTICE.txt", "MCPServer.dll"}
     needed.update(re.findall(r"<File [^>]*>([^<]+)</File>", text))
-    needed.update(re.findall(r"<UpdateDatabase>([^<]+)</UpdateDatabase>", text))
+    needed.update(updates)
     needed.update(re.findall(r'<EntryPoint [^>]*\bfile="([^"]+)"', text))
     for name in sorted(needed):
         if not os.path.isfile(os.path.join(folder, name)):
             problems.append("the package has no %s" % name)
+    sql = [read_text(os.path.join(folder, n)) for n in updates if os.path.isfile(os.path.join(folder, n))]
+    if not any(
+        re.search(r"INSERT\s+(?:OR\s+\w+\s+)?INTO\s+[\"`\[]?DllPlugins\b[^;]*'MCPServer\.dll'", s, re.I) for s in sql
+    ):
+        problems.append("no database update in the package adds MCPServer.dll to DllPlugins, so Bazaar would skip it")
     dll = os.path.join(folder, "MCPServer.dll")
     if os.path.isfile(dll):
         with open(dll, "rb") as f:
@@ -231,15 +248,40 @@ def publish_problems(version, info, state, notes):
             problems.append("the build used a local SDK; build again without --sdk")
     for name in state.missing:
         problems.append("the build has no %s; build again" % name)
-    if state.remote_tag and state.remote_tag != state.head:
-        problems.append("%s is on GitHub at another commit; delete that tag on GitHub, or raise VERSION" % tag)
-    if state.release == "draft":
-        problems.append("%s has a draft release on GitHub; publish it there, or delete it and run publish again" % tag)
-    elif state.release == "published":
+    if state.github_release == "published":
         problems.append("%s is already released; raise VERSION for the next release" % tag)
+    elif state.github_release == "draft" and state.remote_tag == state.head:
+        problems.append(
+            "%s has a draft release on GitHub; check its files, then publish it there, "
+            "or delete it and run publish again" % tag
+        )
+    elif state.github_release == "draft" and state.remote_tag:
+        problems.append(
+            "%s has a draft release on GitHub from another commit; delete the draft and its tag there, "
+            "delete the tag here with git tag -d %s, then run publish again" % (tag, tag)
+        )
+    elif state.github_release == "draft":
+        problems.append(
+            "%s has a draft release on GitHub with no tag; delete the draft there, then run publish again" % tag
+        )
+    elif state.remote_tag and state.remote_tag != state.head:
+        problems.append(
+            "%s is on GitHub at another commit; delete that tag there and here (git tag -d %s), or raise VERSION"
+            % (tag, tag)
+        )
     if bazaar_sentence(version) not in notes:
         problems.append("the notes do not say %r" % bazaar_sentence(version))
     return problems
+
+
+def publish_commands(version, state, files, title, notes_file):
+    tag = "v" + version.release
+    push = None if state.remote_tag else ["git", "push", "origin", "%s:refs/tags/%s" % (state.head, tag)]
+    create = ["gh", "release", "create", tag] + list(files) + ["--repo", PLUGIN_REPO, "--draft", "--verify-tag"]
+    create += ["--title", title, "--notes-file", notes_file]
+    if version.major == 0:
+        create.append("--prerelease")
+    return push, create
 
 
 def refuse(problems):
@@ -251,6 +293,8 @@ def run(command):
     try:
         done = subprocess.run(command, cwd=REPO, capture_output=True, text=True)
     except FileNotFoundError:
+        if os.path.isabs(command[0]):
+            raise ReleaseError("%s does not exist" % command[0])
         raise ReleaseError("%s is not installed or not on PATH" % command[0])
     if done.returncode:
         raise ReleaseError("%s failed: %s" % (" ".join(command), done.stderr.strip()))
@@ -275,14 +319,19 @@ def check():
     return version, problems + order_problems(version.release, release_tags())
 
 
+def release_folder(version):
+    return os.path.join(OUT, version.release)
+
+
 def release_files(version, project):
     # Not ModBuddy's file name: GitHub rewrites the spaces and brackets in it.
-    base = os.path.join(OUT, version.release, "%s-%s" % (mod_name(project).replace(" ", "-"), version.release))
+    base = os.path.join(release_folder(version), "%s-%s" % (mod_name(project).replace(" ", "-"), version.release))
     return base + ".civ5mod", base + "-symbols.zip"
 
 
 def sdk_root(folder, what):
-    found = [os.path.dirname(p) for p in glob.glob(os.path.join(folder, "**", "CivPlugin.vsprops"), recursive=True)]
+    pattern = os.path.join(glob.escape(folder), "**", "CivPlugin.vsprops")
+    found = [os.path.dirname(p) for p in glob.glob(pattern, recursive=True)]
     if len(found) != 1:
         raise ReleaseError("%s in %s has %d CivPlugin.vsprops files, not one" % (what, folder, len(found)))
     return found[0]
@@ -294,12 +343,15 @@ def download_sdk(bazaar):
         os.makedirs(os.path.dirname(folder), exist_ok=True)
         with tempfile.TemporaryDirectory(dir=os.path.dirname(folder)) as work:
             gh("release", "download", "v" + bazaar, "--repo", BAZAAR_REPO, "--pattern", SDK_ASSET, "--dir", work)
-            zips = glob.glob(os.path.join(work, "*.zip"))
+            zips = glob.glob(os.path.join(glob.escape(work), "*.zip"))
             if len(zips) != 1:
                 raise ReleaseError("Bazaar v%s has %d files matching %s, not one" % (bazaar, len(zips), SDK_ASSET))
             extracted = os.path.join(work, "sdk")
-            with zipfile.ZipFile(zips[0]) as z:
-                z.extractall(extracted)
+            try:
+                with zipfile.ZipFile(zips[0]) as z:
+                    z.extractall(extracted)
+            except zipfile.BadZipFile:
+                raise ReleaseError("the Bazaar v%s SDK download, %s, is not a zip file" % (bazaar, zips[0]))
             # Moved into place only once complete and checked, so a broken download is never taken for an SDK.
             sdk_root(extracted, "the Bazaar v%s SDK" % bazaar)
             os.replace(extracted, folder)
@@ -319,11 +371,9 @@ def sdk_api_version(sdk):
 
 
 def run_build_cmd(sdk, package):
-    # vcbuild may not notice that BAZAAR_SDK now names another SDK and would keep objects built against the old one,
-    # and ModBuddy's staging folder keeps files the project no longer lists.
-    for folder in (BUILD_OUT, STAGING):
-        if os.path.isdir(folder):
-            shutil.rmtree(folder)
+    # vcbuild may not notice that BAZAAR_SDK now names another SDK, and would keep objects built against the old one.
+    if os.path.isdir(BUILD_OUT):
+        shutil.rmtree(BUILD_OUT)
     if os.path.exists(package):
         os.remove(package)
     if subprocess.run(["cmd", "/c", BUILD_CMD], env=dict(os.environ, BAZAAR_SDK=sdk)).returncode != 0:
@@ -332,24 +382,57 @@ def run_build_cmd(sdk, package):
         raise ReleaseError("build.cmd made no %s" % package)
 
 
-def clear_release_folder(out):
-    # The release skill drafts notes.md here, so a rebuild keeps it.
-    for name in os.listdir(out) if os.path.isdir(out) else []:
-        path = os.path.join(out, name)
+def clear_build_outputs(out, files):
+    # Only what a build writes, so notes drafted in the same folder survive a rebuild.
+    for path in [os.path.join(out, "unpacked"), os.path.join(out, "build.json")] + list(files):
         if os.path.isdir(path):
             shutil.rmtree(path)
-        elif name != "notes.md":
+        elif os.path.exists(path):
             os.remove(path)
+
+
+def write_build_info(out, commit, clean, downloaded_sdk):
+    with open(os.path.join(out, "build.json"), "w", encoding="utf-8") as f:
+        json.dump({"commit": commit, "clean": clean, "downloaded_sdk": downloaded_sdk}, f, indent=2)
+
+
+def read_build_info(out):
+    path = os.path.join(out, "build.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            info = json.load(f)
+        return {key: info[key] for key in ("commit", "clean", "downloaded_sdk")}
+    except (ValueError, KeyError, TypeError):
+        raise ReleaseError("%s cannot be read; build again" % path)
 
 
 def tree_state():
     return git("rev-parse", "HEAD"), git("status", "--porcelain") == ""
 
 
+def write_release(package, version, project, commit, clean, downloaded_sdk):
+    out = release_folder(version)
+    civ5mod, symbols = release_files(version, project)
+    clear_build_outputs(out, (civ5mod, symbols))
+    unpacked = os.path.join(out, "unpacked")
+    os.makedirs(unpacked)
+    run([WINDOWS_TAR, "-xf", package, "-C", unpacked])
+    refuse(package_problems(unpacked, version))
+    shutil.copyfile(package, civ5mod)
+    with zipfile.ZipFile(symbols, "w", zipfile.ZIP_DEFLATED) as z:
+        for name in ("MCPServer.pdb", "MCPServer.map"):
+            z.write(os.path.join(BUILD_OUT, name), name)
+    write_build_info(out, commit, clean, downloaded_sdk)
+    return out
+
+
 def build(sdk_folder):
     version, problems = check()
     refuse(problems)
-    sdk = sdk_root(os.path.abspath(sdk_folder), "the SDK") if sdk_folder else download_sdk(version.bazaar)
+    trial = bool(sdk_folder)
+    sdk = sdk_root(os.path.abspath(sdk_folder), "the SDK") if trial else download_sdk(version.bazaar)
     api = sdk_api_version(sdk)
     if api != version.api:
         raise ReleaseError(
@@ -361,22 +444,7 @@ def build(sdk_folder):
     run_build_cmd(sdk, package)
     if tree_state() != (commit, clean):
         raise ReleaseError("the tree changed while building; build again")
-
-    out = os.path.join(OUT, version.release)
-    clear_release_folder(out)
-    unpacked = os.path.join(out, "unpacked")
-    os.makedirs(unpacked)
-    subprocess.run([WINDOWS_TAR, "-xf", package, "-C", unpacked], check=True)
-    refuse(package_problems(unpacked, version))
-
-    civ5mod, symbols = release_files(version, project)
-    shutil.copyfile(package, civ5mod)
-    with zipfile.ZipFile(symbols, "w", zipfile.ZIP_DEFLATED) as z:
-        for name in ("MCPServer.pdb", "MCPServer.map"):
-            z.write(os.path.join(BUILD_OUT, name), name)
-    info = {"commit": commit, "clean": clean, "downloaded_sdk": not sdk_folder}
-    with open(os.path.join(out, "build.json"), "w", encoding="utf-8") as f:
-        json.dump(info, f, indent=2)
+    out = write_release(package, version, project, commit, clean, downloaded_sdk=not trial)
     print(
         "%s %s, built against Bazaar %s from %s%s with a %s SDK, in %s"
         % (
@@ -385,56 +453,43 @@ def build(sdk_folder):
             version.bazaar,
             commit[:7],
             "" if clean else " plus uncommitted changes",
-            "downloaded" if not sdk_folder else "local",
+            "local" if trial else "downloaded",
             out,
         )
     )
-
-
-def build_info(version):
-    path = os.path.join(OUT, version.release, "build.json")
-    if not os.path.isfile(path):
-        return None
-    try:
-        with open(path, encoding="utf-8") as f:
-            info = json.load(f)
-        return {key: info[key] for key in ("commit", "clean", "downloaded_sdk")}
-    except (ValueError, KeyError, TypeError):
-        raise ReleaseError("%s cannot be read; build again" % path)
 
 
 def publish(notes_file):
     if not os.path.isfile(notes_file):
         raise ReleaseError("there is no notes file %s" % notes_file)
     notes = read_text(notes_file)
-    git("fetch", "--quiet", "--tags", "origin", "main")
+    # GitHub's tags win over local ones, which are left at an old commit when a release's tag is remade on GitHub.
+    git("fetch", "--quiet", "--tags", "--force", "origin", "main")
     version = parse_version(read_text(VERSION_FILE))
     project = read_text(PROJECT)
     tag = "v" + version.release
     head, clean = tree_state()
     files = release_files(version, project)
+    releases = json.loads(gh("release", "list", "--repo", PLUGIN_REPO, "--json", "tagName,isDraft", "--limit", "1000"))
     state = PublishState(
         branch=git("rev-parse", "--abbrev-ref", "HEAD"),
         clean=clean,
         head=head,
         origin_head=git("rev-parse", "origin/main"),
         remote_tag=remote_commit(git("ls-remote", "--tags", "origin", tag, tag + "^{}"), tag),
-        release=release_state(json.loads(gh("release", "list", "--json", "tagName,isDraft", "--limit", "1000")), tag),
+        github_release=release_state(releases, tag),
         tags=release_tags(),
         missing=[os.path.basename(f) for f in files if not os.path.isfile(f)],
     )
     problems = disagreements(version, read_text(VERSION_HEADER), project)
-    refuse(problems + publish_problems(version, build_info(version), state, notes))
+    refuse(problems + publish_problems(version, read_build_info(release_folder(version)), state, notes))
 
-    if state.remote_tag is None:
-        git("push", "origin", "%s:refs/tags/%s" % (head, tag))
     title = "%s %s" % (mod_name(project), version.release)
-    command = ["release", "create", tag] + list(files)
-    command += ["--draft", "--verify-tag", "--title", title, "--notes-file", os.path.abspath(notes_file)]
-    if numbers(version.release)[0] == 0:
-        command.append("--prerelease")
+    push, create = publish_commands(version, state, files, title, os.path.abspath(notes_file))
+    if push:
+        run(push)
     try:
-        gh(*command)
+        run(create)
     except ReleaseError as e:
         raise ReleaseError(
             "%s\n%s is on GitHub; if a draft release of it was made, delete the draft there, then run publish again"
@@ -442,13 +497,13 @@ def publish(notes_file):
         )
     print("Draft release %s made; publish it on GitHub." % tag)
     try:
-        git("fetch", "--quiet", "origin", "refs/tags/%s:refs/tags/%s" % (tag, tag))
+        git("fetch", "--quiet", "origin", "+refs/tags/%s:refs/tags/%s" % (tag, tag))
     except ReleaseError:
-        print("Its tag is not here yet; fetch it with git fetch --tags.")
+        print("Its tag is not here yet; fetch it with git fetch --tags --force.")
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     steps = parser.add_subparsers(dest="step", required=True)
     steps.add_parser("check")
     build_step = steps.add_parser("build")
@@ -472,7 +527,7 @@ def main(argv):
         for line in str(e).splitlines():
             print("release: " + line, file=sys.stderr)
         return 1
-    except (subprocess.CalledProcessError, OSError, ValueError) as e:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
         print("release: %s" % e, file=sys.stderr)
         return 1
     return 0

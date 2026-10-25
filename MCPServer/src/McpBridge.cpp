@@ -12,6 +12,7 @@
 #include "McpDiplomacy.h"
 #include "McpLogText.h"
 #include "McpSeatPlayback.h"
+#include "McpVersion.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
 #include "CvGlobals.h"
@@ -960,8 +961,8 @@ picojson::value McpBridge::Impl::HandleRpc(const picojson::value& request, const
 		picojson::object caps;
 		caps["tools"] = picojson::value(picojson::object());
 		picojson::object info;
-		info["name"] = picojson::value("civ5-local-mcp-server");
-		info["version"] = picojson::value("0.1");
+		info["name"] = picojson::value("civ5-mcp-plugin");
+		info["version"] = picojson::value(MCP_SERVER_VERSION);
 		picojson::object result;
 		result["protocolVersion"] = picojson::value(version);
 		result["capabilities"] = picojson::value(caps);

@@ -1,0 +1,45 @@
+[h1]MCP Server for Bazaar[/h1]
+Play Civilization V with one or more AI models as your teammates or your rivals, or let one play your own civilization while you watch. This mod is a plugin for the Bazaar Multi-DLL Mod Loader. It runs an MCP (Model Context Protocol) server on your PC, so any AI model connected through an MCP client on the same PC can see the game and play it: research, build, fight, trade and talk to the other leaders. An "AI Log" button shows what it is doing each turn.
+
+Requires Bazaar 0.4.0 or newer.
+
+[h2]What you need[/h2]
+[list]
+[*]Civilization V with Brave New World, on Windows
+[*]Bazaar's two mods: Bazaar Multi-DLL Mod Loader and Bazaar - VMC Bootstrap (required)
+[*]An MCP client that runs on your PC and can connect to a local HTTP server. Claude Code is tested: https://claude.com/claude-code
+[*]A subscription to your favorite AI model. This requires a fair amount of tokens to be able to play a long game, and not burn through your entire 5-hour window or weekly window. A Claude Max subscription works with plenty of room to spare on Opus 5.5.
+[/list]
+Chat apps that run their connectors in the cloud, such as the ChatGPT or Claude websites, cannot reach a server on your PC.
+
+[h2]Setup (one time)[/h2]
+[olist]
+[*]Subscribe to this mod and to Bazaar's two mods.
+[*]Add the server to your MCP client. For Claude Code, open a terminal and run:
+[code]claude mcp add --transport http --scope user civ5 http://127.0.0.1:7676/mcp[/code]
+Other clients: add an HTTP MCP server at http://127.0.0.1:7676/mcp.
+[*]Make a folder for your AI's Civ games, for example Documents\Civ5 AI, and always start your client from it, so it remembers what it learns between games.
+[/olist]
+
+[h2]Playing a game[/h2]
+[olist]
+[*]In Civilization V, open Mods, enable Bazaar - VMC Bootstrap (required), Bazaar Multi-DLL Mod Loader and MCP Server for Bazaar, and start a single-player game. To put AI civilizations on your team, open Advanced Setup: Bazaar's Plugins screen comes first, and its Continue button opens Advanced Setup.
+[*]Once the map has loaded, start your MCP client in your AI folder and ask it to play.
+[*]It names itself, then asks which role you want: your civilization, a teammate, or a secret opponent. A secret opponent's civilization is chosen at random and stays hidden until you meet it.
+[*]To add another AI, start a second MCP client in its own window and ask it to play too. Each AI chooses its own civilization; you can mix teammates and opponents.
+[*]Play your turns as usual. The AI plays its turn after yours and waits for its turn by itself.
+[*]The log window includes a 2-way chat for you to communicate with your teammate LLM without leaving the game. It dings when you receive a message from the LLM.
+[/olist]
+
+[h2]Good to know[/h2]
+[list]
+[*]The AI can only connect while a game is loaded (meaning the world map is up).
+[*]The server only listens on your own PC. Nothing in the game is reachable from the internet.
+[*]Saves keep the AI's civilization. After loading a save, start your client again and it picks up where it left off.
+[*]The AI Log shows what the AIs on your team are doing. Nothing an AI did while it was your opponent is ever shown, even if it later joins your team. Its full reasoning stays in its own client window.
+[*]Single player only. Multiplayer and hotseat are not supported.
+[*]Bazaar's Plugins screen shows whether this plugin loaded, and why not if it didn't, for example when your Bazaar is too old.
+[*]This mod replaces Local MCP Server DLL, so turn that one off.
+[*]Bazaar replaces the game DLL, so this mod can't be used with other mods that replace it, such as the Community Patch, Vox Populi, or Gaia's Core Mod.
+[*]If your civilization is eliminated while an AI is still playing, the game keeps going and you can watch them finish it.
+[/list]

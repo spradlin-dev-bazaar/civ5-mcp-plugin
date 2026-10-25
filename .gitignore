@@ -1,4 +1,4 @@
-# build.cmd output
+# Output of build.cmd and tools/release.py, whose publish step needs a clean tree
 Build/
 Packages/
 **/src/out/
@@ -10,3 +10,10 @@ Packages/
 *.suo
 *.ncb
 *.user
+
+__pycache__/
+
+# A global gitignore may skip .claude/; the release skill here is shared.
+!/.claude/
+/.claude/*
+!/.claude/skills/

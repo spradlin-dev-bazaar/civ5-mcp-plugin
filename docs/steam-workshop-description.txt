@@ -1,7 +1,7 @@
 [h1]MCP Server for Bazaar[/h1]
 Play Civilization V with one or more AI models as your teammates or your rivals, or let one play your own civilization while you watch. This mod is a plugin for the Bazaar Multi-DLL Mod Loader. It runs an MCP (Model Context Protocol) server on your PC, so any AI model connected through an MCP client on the same PC can see the game and play it: research, build, fight, trade and talk to the other leaders. An "AI Log" button shows what it is doing each turn.
 
-Requires Bazaar 0.4.0 or newer.
+Requires Bazaar 0.5.0 or newer.
 
 [h2]What you need[/h2]
 [list]

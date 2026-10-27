@@ -16,7 +16,7 @@ description: Make a release of the MCP server plugin - choose the number, prepar
 - MAJOR goes up when the release breaks something, such as a tool removed or renamed or an argument changed, so prompts written for the old one stop working. MINOR then goes back to 0.
 - The Bazaar line names the oldest Bazaar release the plugin works with, and the SDK it is built against. Raise it whenever the plugin needs something newer, an API addition or a fix.
 
-Fetch GitHub's tags first (`git fetch --tags --force`), then read `git log v<last release>..main` and propose the number to the user. For the first release there is no earlier tag: `VERSION` already holds 0.1.1, so read the whole log and check that number instead.
+Fetch GitHub's tags first (`git fetch --tags --force`), then read `git log v<last release>..main` and propose the number to the user.
 
 ## 2. Prepare
 

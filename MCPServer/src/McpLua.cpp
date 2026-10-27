@@ -1,4 +1,5 @@
 #include "CvGameCoreDLLPCH.h"
+#include "CivPluginApi.h"
 #include "McpLua.h"
 #include "McpBridge.h"
 #include "McpSeat.h"
@@ -141,22 +142,22 @@ namespace
 		return 0;
 	}
 
-	void AddMethod(lua_State* L, const char* name, lua_CFunction fn)
+	void AddMethod(const CivHostInfo* host, lua_State* L, const char* name, CivLuaFunction fn)
 	{
-		lua_pushcclosure(L, fn, 0);
+		host->PushLuaFunction(host->pluginIndex, L, fn);
 		lua_setfield(L, -2, name);
 	}
 }
 
-void McpAddGameMethods(lua_State* L)
+void McpAddGameMethods(const CivHostInfo* host, lua_State* L)
 {
-	AddMethod(L, "GetLLMLog", &lGetLLMLog);
-	AddMethod(L, "GetLLMIdentity", &lGetLLMIdentity);
-	AddMethod(L, "LLMNotePopup", &lLLMNotePopup);
-	AddMethod(L, "LLMSetActiveMods", &lLLMSetActiveMods);
-	AddMethod(L, "LLMDialogsToClose", &lLLMDialogsToClose);
-	AddMethod(L, "GetLLMTeammates", &lGetLLMTeammates);
-	AddMethod(L, "LLMChat", &lLLMChat);
-	AddMethod(L, "LLMChatUnread", &lLLMChatUnread);
-	AddMethod(L, "LLMChatSeen", &lLLMChatSeen);
+	AddMethod(host, L, "GetLLMLog", &lGetLLMLog);
+	AddMethod(host, L, "GetLLMIdentity", &lGetLLMIdentity);
+	AddMethod(host, L, "LLMNotePopup", &lLLMNotePopup);
+	AddMethod(host, L, "LLMSetActiveMods", &lLLMSetActiveMods);
+	AddMethod(host, L, "LLMDialogsToClose", &lLLMDialogsToClose);
+	AddMethod(host, L, "GetLLMTeammates", &lGetLLMTeammates);
+	AddMethod(host, L, "LLMChat", &lLLMChat);
+	AddMethod(host, L, "LLMChatUnread", &lLLMChatUnread);
+	AddMethod(host, L, "LLMChatSeen", &lLLMChatSeen);
 }

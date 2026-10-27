@@ -81,11 +81,14 @@ static void AfterEqualizeDeal(CvDealAI* self, CvDeal* pDeal, PlayerTypes eOtherP
 	McpEndEqualizing();
 }
 
-typedef bool (*IsDealWithHumanAcceptableFn)(CvDealAI*, CvDeal*, PlayerTypes, int&, int&, int&, int&, int&, bool&);
-
-static bool ReplaceIsDealWithHumanAcceptable(IsDealWithHumanAcceptableFn original, CvDealAI* self, CvDeal* pDeal, PlayerTypes eOtherPlayer, int& iTotalValueToMe, int& iValueImOffering, int& iValueTheyreOffering, int& iAmountOverWeWillRequest, int& iAmountUnderWeWillOffer, bool& bCantMatchOffer)
+static bool ReplaceIsDealWithHumanAcceptable(CivHooks::CvDealAI_IsDealWithHumanAcceptable::Original original, CvDealAI* self, CvDeal* pDeal, PlayerTypes eOtherPlayer, int& iTotalValueToMe, int& iValueImOffering, int& iValueTheyreOffering, int& iAmountOverWeWillRequest, int& iAmountUnderWeWillOffer, bool& bCantMatchOffer)
 {
 	return original(self, pDeal, McpEqualizingWith(eOtherPlayer), iTotalValueToMe, iValueImOffering, iValueTheyreOffering, iAmountOverWeWillRequest, iAmountUnderWeWillOffer, bCantMatchOffer);
+}
+
+static void AfterRegisterGame(lua_State* L)
+{
+	McpAddGameMethods(s_host, L);
 }
 
 static void UnitOrdersCancelled(CvUnit* unit, int reason)
@@ -108,7 +111,7 @@ static void PopupRaised(int player, int popupType, int data1, int data2, int dat
 	McpNoteSeatPopup((PlayerTypes)player, popupType, data1, data2, data3, option1, text);
 }
 
-static void NotificationAdded(int player, int notificationType, const char* message, const char* summary, int x, int y, int data1, int data2)
+static void NotificationAdded(int player, int notificationType, const char* message, const char* summary, int x, int y, int data1, int data2, int lookupIndex)
 {
 	McpNoteSeatNotification((PlayerTypes)player, message, summary);
 }
@@ -125,27 +128,22 @@ PLUGIN_EXPORT bool CivPluginEntry(const CivHostInfo* host, CivPluginInfo* plugin
 	McpBridge::Get();
 	plugin->name = "MCP Server for Bazaar";
 	plugin->version = MCP_SERVER_VERSION;
-	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvGame_update::ID, CIV_HOOK_BEFORE, (void*)&BeforeGameUpdate), "before CvGame::update");
-	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvGame_Read::ID, CIV_HOOK_AFTER, (void*)&AfterGameRead), "after CvGame::Read");
+	Check(CivRegisterBefore<CivHooks::CvGame_update>(host, &BeforeGameUpdate), "before CvGame::update");
+	Check(CivRegisterAfter<CivHooks::CvGame_Read>(host, &AfterGameRead), "after CvGame::Read");
 	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvDllPlayer_IsHuman::ID, CIV_HOOK_AFTER, (void*)&AfterDllPlayerIsHuman), "after CvDllPlayer::IsHuman");
 	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvDllPreGame_isHuman::ID, CIV_HOOK_AFTER, (void*)&AfterDllPreGameIsHuman), "after CvDllPreGame::isHuman");
-	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvDiplomacyRequests_SendRequest::ID, CIV_HOOK_BEFORE, (void*)&BeforeSendRequest),
-		"before CvDiplomacyRequests::SendRequest");
-	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvDiplomacyRequests_SendDealRequest::ID, CIV_HOOK_BEFORE, (void*)&BeforeSendDealRequest),
-		"before CvDiplomacyRequests::SendDealRequest");
-	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvDealAI_DoEqualizeDealWithHuman::ID, CIV_HOOK_BEFORE, (void*)&BeforeEqualizeDeal),
-		"before CvDealAI::DoEqualizeDealWithHuman");
-	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvDealAI_DoEqualizeDealWithHuman::ID, CIV_HOOK_AFTER, (void*)&AfterEqualizeDeal),
-		"after CvDealAI::DoEqualizeDealWithHuman");
-	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvDealAI_IsDealWithHumanAcceptable::ID, CIV_HOOK_REPLACE, (void*)&ReplaceIsDealWithHumanAcceptable),
-		"replace CvDealAI::IsDealWithHumanAcceptable");
-	Check(host->RegisterHook(host->pluginIndex, CivHooks::CvLuaGame_RegisterMembers::ID, CIV_HOOK_AFTER, (void*)&McpAddGameMethods), "after CvLuaGame::RegisterMembers");
-	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_IS_PLUGIN_CONTROLLED_PLAYER, (void*)&IsPluginControlledPlayer), "IsPluginControlledPlayer");
-	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_KEEP_DEAD_SLOT_OPEN, (void*)&KeepDeadSlotOpen), "KeepDeadSlotOpen");
-	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_POPUP_RAISED, (void*)&PopupRaised), "PopupRaised");
-	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_NOTIFICATION_ADDED, (void*)&NotificationAdded), "NotificationAdded");
-	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_DEAL_RESOLVED, (void*)&DealResolved), "DealResolved");
-	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_UNIT_ORDERS_CANCELLED, (void*)&UnitOrdersCancelled), "UnitOrdersCancelled");
+	Check(CivRegisterBefore<CivHooks::CvDiplomacyRequests_SendRequest>(host, &BeforeSendRequest), "before CvDiplomacyRequests::SendRequest");
+	Check(CivRegisterBefore<CivHooks::CvDiplomacyRequests_SendDealRequest>(host, &BeforeSendDealRequest), "before CvDiplomacyRequests::SendDealRequest");
+	Check(CivRegisterBefore<CivHooks::CvDealAI_DoEqualizeDealWithHuman>(host, &BeforeEqualizeDeal), "before CvDealAI::DoEqualizeDealWithHuman");
+	Check(CivRegisterAfter<CivHooks::CvDealAI_DoEqualizeDealWithHuman>(host, &AfterEqualizeDeal), "after CvDealAI::DoEqualizeDealWithHuman");
+	Check(CivRegisterReplace<CivHooks::CvDealAI_IsDealWithHumanAcceptable>(host, &ReplaceIsDealWithHumanAcceptable), "replace CvDealAI::IsDealWithHumanAcceptable");
+	Check(CivRegisterAfter<CivHooks::CvLuaGame_RegisterMembers>(host, &AfterRegisterGame), "after CvLuaGame::RegisterMembers");
+	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_IS_PLUGIN_CONTROLLED_PLAYER, (void*)static_cast<CivPlayerQueryFn>(&IsPluginControlledPlayer)), "IsPluginControlledPlayer");
+	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_KEEP_DEAD_SLOT_OPEN, (void*)static_cast<CivPlayerQueryFn>(&KeepDeadSlotOpen)), "KeepDeadSlotOpen");
+	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_POPUP_RAISED, (void*)static_cast<CivPopupRaisedFn>(&PopupRaised)), "PopupRaised");
+	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_NOTIFICATION_ADDED, (void*)static_cast<CivNotificationAddedFn>(&NotificationAdded)), "NotificationAdded");
+	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_DEAL_RESOLVED, (void*)static_cast<CivDealResolvedFn>(&DealResolved)), "DealResolved");
+	Check(host->RegisterHandHook(host->pluginIndex, CIV_HAND_UNIT_ORDERS_CANCELLED, (void*)static_cast<CivUnitOrdersCancelledFn>(&UnitOrdersCancelled)), "UnitOrdersCancelled");
 	return true;
 }
 

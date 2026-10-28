@@ -305,6 +305,46 @@ namespace
 		}
 		return targets;
 	}
+
+	// The steps of CvLuaPlayer::lGetRecommendedFoundCityPlots, which needs the unit selected on screen. Kept identical,
+	// odd loop bounds and all, so models get the sites the game marks for a human.
+	JArr RecommendedSites(CvPlayer* me, CvUnit* u)
+	{
+		const int iEvalDistance = GC.getSETTLER_EVALUATION_DISTANCE();
+		const int iDropoffMod = GC.getSETTLER_DISTANCE_DROPOFF_MODIFIER();
+		CvWeightedVector<CvPlot*, 800, true> candidates;
+		for(int x = u->getX() - iEvalDistance; x != u->getX() + iEvalDistance; ++x)
+		{
+			for(int y = u->getY() - iEvalDistance; y != u->getY() + iEvalDistance; ++y)
+			{
+				CvPlot* p = GC.getMap().plot(x, y);
+				if(!p || !p->isRevealed(u->getTeam()) || !me->canFound(x, y) || p->isVisibleEnemyUnit(me->GetID())) continue;
+				int iValue = me->AI_foundValue(x, y, -1, false);
+				iValue = iValue * (100 - iDropoffMod * plotDistance(x, y, u->getX(), u->getY()) / iEvalDistance) / 100;
+				const int iDanger = me->GetPlotDanger(*p);
+				if(iDanger < 1000) candidates.push_back(p, (1000 - iDanger) * iValue / 1000);
+			}
+		}
+		candidates.SortItems();
+		JArr sites;
+		int iFailLimit = 20;
+		for(int i = 0; i < candidates.size() && sites.size() < 3; ++i)
+		{
+			CvPlot* p = candidates.GetElement(i);
+			int iTurns = 0;
+			if(!u->GeneratePath(p, MOVE_TERRITORY_NO_UNEXPLORED, true, &iTurns))
+			{
+				if(iFailLimit-- == 0) break;
+				continue;
+			}
+			JObj s;
+			s["x"] = J(p->getX());
+			s["y"] = J(p->getY());
+			s["turns"] = J(iTurns);
+			sites.push_back(JVal(s));
+		}
+		return sites;
+	}
 }
 
 MCP_TOOL(ToolUnitOptions)
@@ -353,6 +393,8 @@ MCP_TOOL(ToolUnitOptions)
 	if(!promotions.empty()) o["promotions_available"] = JVal(promotions);
 	JArr targets = AttackTargets(me, u);
 	if(!targets.empty()) o["attack_targets"] = JVal(targets);
+	// The game's screen (InGame.lua) marks no sites before the player's first city.
+	if(u->isFound() && me->getNumCities() > 0) o["recommended_sites"] = JVal(RecommendedSites(me, u));
 
 	JArr adjacent;
 	for(int d = 0; d < NUM_DIRECTION_TYPES; ++d)
@@ -1106,7 +1148,7 @@ namespace
 		  "All your units with position, moves left, health, strength and current activity. needs_orders=true means the unit is idle this turn.",
 		  SCHEMA_EMPTY, ToolUnits, LOG_NONE, false },
 		{ "unit_options",
-		  "What one unit can do right now: actions for unit_action, tile improvements it can build here, promotions available, enemies it can attack, and which adjacent tiles it can enter.",
+		  "What one unit can do right now: actions for unit_action, tile improvements it can build here, promotions available, enemies it can attack, and which adjacent tiles it can enter. For a settler, once you have a city, recommended_sites lists up to three city sites with the turns to reach each: the ones the game marks for a human player who selects that settler. They are the game's suggestions; where to settle is your choice.",
 		  SCHEMA_UNIT, ToolUnitOptions, LOG_NONE, false },
 		{ "cities",
 		  "All your cities: population, growth, production, the buildings each already has, focus and per-turn yields.",

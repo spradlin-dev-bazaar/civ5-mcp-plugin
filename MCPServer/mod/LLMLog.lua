@@ -292,6 +292,7 @@ Controls.OpenButton:RegisterCallback(Mouse.eLClick, Open);
 Controls.CloseButton:RegisterCallback(Mouse.eLClick, Close);
 
 local g_PendingDismiss = {};
+local g_Stopped = false;
 
 local function GoodyText(popupInfo)
 	local goody = GameInfo.GoodyHuts[popupInfo.Data1];
@@ -306,6 +307,9 @@ local function GoodyText(popupInfo)
 end
 
 local function OnGamePopup(popupInfo)
+	if g_Stopped then
+		return;
+	end
 	local text = popupInfo.Text or "";
 	if popupInfo.Type == ButtonPopupTypes.BUTTONPOPUP_GOODY_HUT_REWARD then
 		text = GoodyText(popupInfo);
@@ -435,7 +439,7 @@ local function ShowSeatTurnBanner(iPlayerID)
 end
 Events.AIProcessingStartedForPlayer.Add(ShowSeatTurnBanner);
 
-ContextPtr:SetUpdate(function(fDeltaTime)
+local function Update(fDeltaTime)
 	CollectAcknowledged();
 	g_SinceIdentity = g_SinceIdentity + fDeltaTime;
 	if g_SinceIdentity >= 1.0 then
@@ -454,6 +458,19 @@ ContextPtr:SetUpdate(function(fDeltaTime)
 		UpdateTeammates();
 		Refresh();
 		Game.LLMChatSeen();
+	end
+end
+
+-- After a crash Bazaar turns the plugin off and every call to it raises. The first error closes the
+-- window for good and is raised once more, so it still reaches Lua.log without repeating every frame.
+ContextPtr:SetUpdate(function(fDeltaTime)
+	local ok, err = pcall(Update, fDeltaTime);
+	if not ok then
+		g_Stopped = true;
+		ContextPtr:ClearUpdate();
+		Controls.Popup:SetHide(true);
+		Controls.OpenButton:SetHide(true);
+		error(err, 0);
 	end
 end);
 

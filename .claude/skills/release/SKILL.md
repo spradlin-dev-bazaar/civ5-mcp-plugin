@@ -1,11 +1,11 @@
 ---
 name: release
-description: Make a release of the MCP server plugin - choose the number, prepare it on a branch, build and check the package, draft the notes, and publish a draft GitHub release. Use when the user wants to release, publish or ship a new version of this plugin.
+description: Make a release of the MCP server plugin - choose the number, prepare it on a branch with its notes, build and check the package, publish the GitHub release and upload it to the Steam Workshop. Use when the user wants to release, publish or ship a new version of this plugin.
 ---
 
 # Releasing the MCP server plugin
 
-`tools/release.py` does the repeatable work; this skill covers the steps around it that need judgment. Building needs Visual C++ 2008, so a release is made on the developer's machine. Ask the user before every step that changes something outside this machine: pushing, the pull request, publishing.
+`tools/release.py` does the repeatable work; this skill covers the steps around it that need judgment. Building needs Visual C++ 2008, so a release is made on the developer's machine. The user approves the number and, all at once, every text others will read; with those approved, merging and publishing need no further OK. The Workshop upload needs the user's go-ahead just before it runs (step 6).
 
 ## 1. Choose the number
 
@@ -24,8 +24,11 @@ On a branch named `release-<version>`:
 
 - set the number in `VERSION`, in `MCPServer/src/McpVersion.h` and in `ModVersion` in `MCPServer/mod/MCPServer.civ5proj`;
 - if the Bazaar line changed, change the last sentence of the civ5proj's description, and the "Requires Bazaar" line in `docs/steam-workshop-description.txt`, to match ("Requires Bazaar X.Y.Z or newer.");
+- draft the release notes in `Build\release\<version>\notes.md`. They open with the Bazaar line, `Requires Bazaar <X.Y.Z> or newer.`, which `publish` requires, say what changed for players since the last release, and end with how to install it, as the last release's notes do;
+- add the same changes at the top of `docs/steam-workshop-changes.txt` in BBCode, under a `[b]<version>[/b]` line, without the install steps or the file names. `workshop` uploads that section as the Workshop change note;
 - run `python tools/release.py check` and `python -m unittest discover -s tests`;
-- commit, push, and open a pull request to main. Once the user has approved its text, merge it and delete the branch, on GitHub and here: `gh pr merge --merge --delete-branch`.
+- show the user, word for word, the commit message, the pull request's title and description, the notes and the change note, and get them approved together;
+- commit, push, and open a pull request to main. Merge it and delete the branch, on GitHub and here: `gh pr merge --merge --delete-branch`.
 
 ## 3. Build
 
@@ -35,18 +38,14 @@ After the merge, switch to main and bring it up to date with GitHub (`git switch
 
 Run the scripted checks against the release's package. They play the test save over MCP with nobody at the keyboard (`tests/ingame/README.md` says what they need): `python tests\ingame\run.py Build\release\<version>\MCP-Server-for-Bazaar-<version>.civ5mod`. Every check must pass. These checks are the game check: don't ask the user to install and play the release.
 
-## 5. Notes
+If a check fails, fix it through a pull request, then build and check again. If the fix changes what the notes or the change note say, get the new text approved.
 
-Draft the notes in `Build\release\<version>\notes.md` and show the user the exact text. They open with the Bazaar line, then say what changed for players since the last release:
+## 5. Publish
 
-    Requires Bazaar <X.Y.Z> or newer.
+`publish` needs the GitHub CLI, `gh`, logged in to an account that can make releases here (`gh auth login`). Run `python tools/release.py publish --notes Build\release\<version>\notes.md`. It pushes the tag `v<version>` and publishes the GitHub release with the package, its debug symbols and the notes. If it stops partway, it says how to finish: usually delete any half-made draft on GitHub, then run it again.
 
-The script refuses notes without that sentence.
+## 6. Steam Workshop
 
-## 6. Publish
+Ask the user for the go-ahead to deploy: the upload reaches every subscriber at once, and Claude Code's auto mode refuses it without the user's approval of that upload. Then run `python tools/release.py workshop`. It needs Steam running and signed in to the account that owns the plugin's Workshop item, and the Sid Meier's Civilization V SDK installed from Steam; ModBuddy itself need not be open. It downloads the package published on GitHub and uploads it to the item, with the release's section of `docs/steam-workshop-changes.txt` as the change note and `docs/steam-workshop-description.txt` as the page's description, then checks that Steam shows the new file. It refuses when the item already holds that file.
 
-`publish` needs the GitHub CLI, `gh`, logged in to an account that can make releases here (`gh auth login`). With the user's OK, run `python tools/release.py publish --notes Build\release\<version>\notes.md`. It pushes the tag `v<version>` and creates a draft GitHub release, marked as a pre-release while MAJOR is 0. If it stops partway, it says how to finish: usually delete any half-made draft on GitHub, then run it again. The user publishes the draft on GitHub.
-
-## 7. Steam Workshop
-
-Uploading to the Workshop stays a manual step in ModBuddy, done by the user. The Workshop page's text is `docs/steam-workshop-description.txt`; paste it into ModBuddy's description.
+`tools/workshop/upload.cpp` is a copy of Bazaar's uploader, in its repository's `tools/workshop`. When a Bazaar SDK ships the uploader, use that one instead.

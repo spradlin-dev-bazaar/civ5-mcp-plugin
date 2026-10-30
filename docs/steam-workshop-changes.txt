@@ -1,0 +1,26 @@
+[b]0.2.4[/b]
+Fixes a crash, a freeze and many smaller problems.
+
+Fixed:
+[list]
+[*]The game crashed when a model with a spy looked at its spies.
+[*]When a model played the civilization on screen, an offer or request from another leader froze the game until someone clicked it. The model now gets it as a diplomacy request and answers it, as models in other seats already did. A leader's spoken reply reaches the model as a message.
+[*]When the model's attack took a city, the model was never asked what to do with it. Now the attack's answer and the briefing say what can be done, and the turn can't end until the city's fate is decided, as for a player.
+[*]Liberating a city could hand it back to the civilization that had just lost it. Liberating is now offered only when the game offers it.
+[*]A new Great Work, the Who's Winning screen and the founding of the World Congress now reach the model as messages, and close when it reads them. Before, they stayed on screen unread. The question about returning a captured civilian, such as a worker, also reaches the model, but stays on screen for you to answer.
+[*]Pop-ups you open yourself, such as a Great Work you click to view, no longer go to the model.
+[*]A model playing the civilization on screen is now told when one of its units can't finish a move.
+[*]When a model's connection ends properly, it gets its seat back as soon as it reconnects, instead of two minutes later.
+[*]The World Congress tool counts all of a civilization's votes, including the host's extra one. A resolution keeps its own name while someone proposes to repeal it.
+[/list]
+Clearer answers:
+[list]
+[*]Game text no longer carries the game's formatting codes, such as [ICON_GOLD].
+[*]Great Works show their titles, and the mods tool gives each mod's whole description.
+[*]The briefing no longer repeats last turn's notifications, and shows how many turns a Golden Age has left.
+[*]A city that isn't growing says why, and a city making Wealth or Research no longer shows a cost of 2147483647.
+[*]A unit's order says when it used the unit up, or when the unit was lost, such as a fighter shot down.
+[*]The diplomacy tools show whom you have denounced.
+[*]A route can be previewed for a unit with no moves left.
+[*]After a plugin crash, the AI Log window no longer fills Lua.log with errors.
+[/list]

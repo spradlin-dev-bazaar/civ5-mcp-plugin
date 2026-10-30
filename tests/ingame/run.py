@@ -2,11 +2,13 @@
 saves/mcp_test.Civ5Save and hands the game over; mcp_checks.py then calls the plugin over MCP, and the checker takes the
 game back, closes it, puts the player's files back and checks that nothing crashed.
 
-    python tests/ingame/run.py [package.civ5mod or mod folder]
+    python tests/ingame/run.py [--hold] [package.civ5mod or mod folder]
 
-Without an argument it checks the mod folder build.cmd made, as a test build: its mod version is raised into the range
-Bazaar's checker keeps for test builds, so it never replaces an installed copy of the released mod. A run takes about
-five minutes and needs what bazaar_check/README.md lists, with Bazaar and its VMC Bootstrap installed.
+--hold leaves the game handed over after the MCP checks, to play on over MCP from where they stop, until python -m
+bazaar_check --hand-back. Without a package or folder it checks the mod folder build.cmd made, as a test build: its mod
+version is raised into the range Bazaar's checker keeps for test builds, so it never replaces an installed copy of the
+released mod. A run takes about five minutes and needs what bazaar_check/README.md lists, with Bazaar and its VMC
+Bootstrap installed.
 """
 
 import contextlib
@@ -54,6 +56,16 @@ hand_over = %(hand_over)s
 log = "Lua.log"
 has = "left the leader screen for the model"
 what = "the AI Log left a leader screen for the model"
+"""
+# Checks of the screen the scenario leaves, which a game played on with --hold no longer shows.
+CLOSED_CHECKS_TOML = """
+[[steps]]
+lua = 'ContextPtr:LookUpControl("/InGame/GreatWorkSplash"):IsHidden()'
+what = "the Great Work pop-up the model acknowledged is closed"
+
+[[steps]]
+lua = 'ContextPtr:LookUpControl("/InGame/WhosWinningPopup"):IsHidden()'
+what = "the Who's Winning screen the model acknowledged is closed"
 """
 
 
@@ -155,14 +167,16 @@ def screenshot():
         say("no picture of the game window: %s" % done.stderr.strip()[:200])
 
 
-def check_while_handed_over():
+def check_while_handed_over(hold):
     try:
         return mcp_checks.run()
     finally:
         try:
             screenshot()
         finally:
-            if not files.hand_back():
+            if hold:
+                say("the game is yours: hand it back with python -m bazaar_check --hand-back in tests\\ingame")
+            elif not files.hand_back():
                 say("the checker was not waiting for the game back")
 
 
@@ -186,12 +200,12 @@ def follow(log, checker):
             time.sleep(0.5)
 
 
-def run_checker(checks_file, folder):
-    """Plays the checks file, running the MCP checks at its hand-over. Returns their results, or None if the checker
-    ended before it handed the game over, and the checker's exit code. The checker writes to a log rather than to this
-    script, so it outlives this script if this script is killed: it still puts the player's files back, once given the
-    game back with python -m bazaar_check --hand-back. Ctrl+C reaches both, and the checker then stops by its own
-    rules."""
+def run_checker(checks_file, folder, hold):
+    """Plays the checks file, running the MCP checks at its hand-over, and with hold leaves the game handed over after
+    them. Returns their results, or None if the checker ended before it handed the game over, and the checker's exit
+    code. The checker writes to a log rather than to this script, so it outlives this script if this script is killed:
+    it still puts the player's files back, once given the game back with python -m bazaar_check --hand-back. Ctrl+C
+    reaches both, and the checker then stops by its own rules."""
     log_path = os.path.join(folder, "checker.log")
     with open(log_path, "w", encoding="utf-8") as out:
         checker = subprocess.Popen(
@@ -208,7 +222,7 @@ def run_checker(checks_file, folder):
             for line in follow(log, checker):
                 print(line, flush=True)
                 if results is None and HAND_OVER in line:
-                    results = check_while_handed_over()
+                    results = check_while_handed_over(hold)
         finally:
             for line in follow(log, checker):
                 print(line, flush=True)
@@ -217,6 +231,8 @@ def run_checker(checks_file, folder):
 
 def main(argv):
     sys.stdout.reconfigure(errors="replace")
+    hold = "--hold" in argv
+    argv = [a for a in argv if a != "--hold"]
     folder = tempfile.mkdtemp(prefix="mcp checks ")
     try:
         if argv:
@@ -228,8 +244,10 @@ def main(argv):
         checks_file = os.path.join(folder, "checks.toml")
         with open(checks_file, "w", encoding="utf-8") as f:
             f.write(CHECKS_TOML % {"mod": toml_text(mod), "save": toml_text(STAGED), "hand_over": toml_text(HAND_OVER)})
+            if not hold:
+                f.write(CLOSED_CHECKS_TOML)
         with staged_save():
-            results, code = run_checker(checks_file, folder)
+            results, code = run_checker(checks_file, folder, hold)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
     if results is None:

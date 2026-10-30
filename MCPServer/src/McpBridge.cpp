@@ -671,7 +671,7 @@ void McpBridge::Impl::DrainPopups()
 		popup.turn = GC.getGame().getGameTurn();
 		popup.player = p.onScreen ? (int)eActive : p.player;
 		popup.dialog = p.onScreen ? McpPopupDialogToClose(p.type) : "";
-		popup.text = McpDescribePopup((PlayerTypes)popup.player, p.type, p.data1, p.data2, p.data3, p.option1, p.text);
+		popup.text = McpTool::StripMarkup(McpDescribePopup((PlayerTypes)popup.player, p.type, p.data1, p.data2, p.data3, p.option1, p.text));
 		if(popup.text.empty())
 		{
 			if(popup.dialog.empty()) continue;

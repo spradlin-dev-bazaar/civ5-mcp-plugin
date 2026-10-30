@@ -251,14 +251,14 @@ MCP_TOOL(ToolCityTask)
 	std::string task = ArgStr(args, "task");
 	if(task == "annex")
 	{
-		if(!c->IsPuppet() && !c->IsIgnoreCityForHappiness()) { err = "the city is already yours outright"; return JVal(); }
+		if(!c->IsPuppet() && !CaptureUndecided(c)) { err = "the city is already yours outright"; return JVal(); }
 		if(me->GetPlayerTraits()->IsNoAnnexing()) { err = "your civilization cannot annex cities"; return JVal(); }
 		c->DoAnnex();
 	}
 	else if(task == "puppet")
 	{
 		if(c->IsPuppet()) { err = "already a puppet"; return JVal(); }
-		if(!c->IsIgnoreCityForHappiness()) { err = "only a city whose fate is still undecided after capture can be made a puppet"; return JVal(); }
+		if(!CaptureUndecided(c)) { err = "only a city whose fate is still undecided after capture can be made a puppet"; return JVal(); }
 		c->DoCreatePuppet();
 	}
 	else if(task == "raze")
@@ -273,8 +273,8 @@ MCP_TOOL(ToolCityTask)
 	}
 	else if(task == "liberate")
 	{
-		PlayerTypes eOrig = c->getOriginalOwner();
-		if(eOrig == NO_PLAYER || eOrig == me->GetID() || !me->CanLiberatePlayerCity(eOrig)) { err = "this city cannot be liberated (its original owner cannot take it back)"; return JVal(); }
+		PlayerTypes eOrig = LiberationTarget(me, c);
+		if(eOrig == NO_PLAYER) { err = "this city cannot be liberated: the game allows it only right after you take a city from someone other than the civilization that founded it, and only if that civilization can come back"; return JVal(); }
 		me->DoLiberatePlayer(eOrig, c->GetID());
 		JObj done;
 		done["ok"] = J(true);

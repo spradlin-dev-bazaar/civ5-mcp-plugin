@@ -3,7 +3,7 @@
 `run.py` checks a build of the plugin in Civilization V the way a model uses it, but with a script in the model's place, so every run makes the same calls and nobody needs to be at the keyboard.
 
 ```
-python tests\ingame\run.py [package.civ5mod or mod folder]
+python tests\ingame\run.py [--hold] [package.civ5mod or mod folder]
 ```
 
 Without an argument it checks the mod folder `MCPServer\build.cmd` made, and refuses if a source file changed after that build. It installs the build as a test build, with its mod version raised into the range Bazaar's checker keeps for test builds, so a copy of the released mod you have installed, such as Steam's, is never replaced. Given a package or a mod folder, it checks that one as it is: use this for a release's package, and know that it takes the place of an installed copy of the same mod version for the run. Either way the plugin must report the release in `VERSION`.
@@ -15,9 +15,9 @@ If `run.py` itself is killed part way, the checker carries on without it. While 
 ## What a run does
 
 1. Bazaar's checker, the `bazaar_check` folder, starts Civilization V through Steam with the build and the mods it needs, and loads `saves\mcp_test.Civ5Save`.
-2. It hands the game over, and `mcp_checks.py` calls the plugin's tools over MCP in a fixed order, checking each answer.
+2. It hands the game over, and `mcp_checks.py` calls the plugin's tools over MCP in a fixed order, checking each answer. It plays Denmark from turn 150 to turn 172, India's turn 151 from a seat, and India's turns 168 and 169 from a second MCP session, the way a second model joins a game. A few checks run Lua in the game through its tuner port, as FireTuner does: to do what the human at the screen would, such as answering the game's question about a captured worker, and to set up city captures that the turns played could not reach.
 3. Before handing the game back, `run.py` saves a picture of the game window to `Build\ingame\game.png`: if a check failed, it shows what was on screen.
-4. The checker takes the game back and checks in `Lua.log` that the AI Log closed the leader screen the checks opened. Then it closes the game, puts back everything it changed in your Civilization V folder, and checks that no plugin crashed and that `Lua.log` has no Lua errors.
+4. The checker takes the game back, checks in `Lua.log` that the AI Log closed the leader screen the checks opened, and checks that the Great Work pop-up and the Who's Winning screen the checks acknowledged are closed (not after `--hold`, when you have played on). Then it closes the game, puts back everything it changed in your Civilization V folder, and checks that no plugin crashed and that `Lua.log` has no Lua errors.
 
 ## Before the first run
 
@@ -51,8 +51,10 @@ Put a new check at the end of the step it belongs to, or in a new step at the en
 
 A refused call, an answer a step cannot use, or a call `c.refuses` expected to be refused but that went through, ends that step. When the step only looks at the game (those in `READ_ONLY`), the steps after it still run; otherwise the scenario stops there and says which steps it did not run.
 
-To try the checks against a game you have open, copy the test save into your saves folder, load it with this plugin switched on, and run `python tests\ingame\mcp_checks.py`.
+To try the checks against a game you have open, copy the test save into your saves folder, load it with this plugin switched on, and run `python tests\ingame\mcp_checks.py`. The game needs `EnableTuner = 1` in `config.ini` for this too, since some checks run Lua in it.
+
+To find the next steps, run `python tests\ingame\run.py --hold`: after the checks, the game stays handed over, so you can play on over MCP from exactly where they stop. The game repeats itself only if the next run makes the same calls, so write down each call that changes the game, in order. Hand the game back with `python -m bazaar_check --hand-back` in `tests\ingame`.
 
 ## The checker
 
-`bazaar_check` is a copy of Bazaar's checker, taken before Bazaar released its `hand_over` step. When a Bazaar release ships it, replace this copy with the one in that release's SDK.
+`bazaar_check` is a copy of Bazaar's checker, taken before Bazaar released its `hand_over` step. When a Bazaar release ships it, replace this copy with the one in that release's SDK. `mcp_checks.py` also uses the copy's tuner client, `tuner.py`, so run the checks once after replacing it.

@@ -4,6 +4,7 @@
 #include "McpBridge.h"
 #include "McpPopups.h"
 #include "McpSeat.h"
+#include "McpToolSupport.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
 #include "CvGlobals.h"
@@ -69,7 +70,7 @@ namespace
 			size_t tab = line.find('\t');
 			McpModInfo mod;
 			mod.name = line.substr(0, tab);
-			if(tab != std::string::npos) mod.description = line.substr(tab + 1);
+			if(tab != std::string::npos) mod.description = McpTool::StripMarkup(line.substr(tab + 1));
 			if(!mod.name.empty()) mods.push_back(mod);
 			start = end + 1;
 		}

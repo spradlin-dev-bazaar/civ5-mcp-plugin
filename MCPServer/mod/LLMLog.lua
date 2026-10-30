@@ -311,6 +311,11 @@ local function OnGamePopup(popupInfo)
 	if g_Stopped then
 		return;
 	end
+	-- The game's screens open pop-ups at this priority when the player clicks something to look at (a Great
+	-- Work, an advisor's answer); pop-ups for what happened in the game never come at it.
+	if popupInfo.Priority == PopupPriority.Current then
+		return;
+	end
 	local text = popupInfo.Text or "";
 	if popupInfo.Type == ButtonPopupTypes.BUTTONPOPUP_GOODY_HUT_REWARD then
 		text = GoodyText(popupInfo);
@@ -433,18 +438,13 @@ end
 
 UpdateIdentity();
 
-local MAX_MOD_DESCRIPTION = 400;
-
 -- One line per mod: "Name (v N)", a tab, then the description flattened to one line.
 local function ReportActiveMods()
 	local mods = {};
 	for _, v in ipairs(Modding.GetActivatedMods()) do
 		local name = Modding.GetModProperty(v.ID, v.Version, "Name") or v.ID;
 		local description = Modding.GetModProperty(v.ID, v.Version, "Description") or "";
-		description = description:gsub("%[NEWLINE%]", " "):gsub("%s+", " "):gsub("^ ", ""):gsub(" $", "");
-		if #description > MAX_MOD_DESCRIPTION then
-			description = description:sub(1, MAX_MOD_DESCRIPTION) .. "...";
-		end
+		description = description:gsub("%s+", " ");
 		table.insert(mods, string.format("%s (v %d)\t%s", (name:gsub("%s+", " ")), v.Version, description));
 	end
 	Game.LLMSetActiveMods(table.concat(mods, "\n"));

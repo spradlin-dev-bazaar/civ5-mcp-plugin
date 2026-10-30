@@ -75,10 +75,11 @@ namespace McpTool
 	const char* UnitTypeKey(UnitTypes e);
 	const char* BuildingName(BuildingTypes e);
 	const char* TechName(TechTypes e);
-	const char* BuildName(BuildTypes e);
+	std::string BuildName(BuildTypes e);
 	const char* EraName(EraTypes e);
 	const char* PromotionName(PromotionTypes e);
 	std::string CivName(PlayerTypes e);
+	std::string StripMarkup(const std::string& s);
 	std::string Localized(const char* szKey);
 
 	UnitTypes FindUnitType(const std::string& key);
@@ -103,7 +104,6 @@ namespace McpTool
 	ProcessTypes FindProcessType(const std::string& key);
 
 	// McpRefusals.cpp: why the game refuses something, in words; "" when it does not refuse.
-	std::string StripMarkup(const std::string& s);
 	std::string TrainRefusal(CvCity* c, UnitTypes eUnit, bool bWillPurchase);
 	std::string BuildRefusal(CvCity* c, BuildingTypes eBuilding, bool bPurchase = false);
 	std::string RestRefusal(CvUnit* u, CvPlot* p, const std::string& action);
@@ -133,6 +133,13 @@ namespace McpTool
 	};
 	bool ResolveAttackTarget(CvPlayer* me, CvUnit* u, CvPlot* p, AttackTarget& out, std::string& why);
 
+	bool CaptureUndecided(CvCity* c);
+	PlayerTypes LiberationTarget(CvPlayer* me, CvCity* c);
+	std::string CaptureChoices(CvPlayer* me, CvCity* c);
+	std::string CaptureDecision(CvPlayer* me, CvCity* c);
+	// The game holds the turn for its own question about this only for the player on screen, who may never see it.
+	std::string UndecidedCapture(CvPlayer* me);
+	std::string EndTurnBlockingText(CvPlayer* me);
 	JVal UnitJson(CvUnit* u);
 	JVal CityJson(CvCity* c);
 	JVal PlotJson(CvPlot* p, TeamTypes eTeam, PlayerTypes eMe, int cx, int cy);

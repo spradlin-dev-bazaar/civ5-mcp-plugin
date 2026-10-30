@@ -38,6 +38,11 @@ namespace
 		}
 	}
 
+	std::string ChoiceText(CvLeague* pLeague, ResolutionDecisionTypes eDecision, int iChoice)
+	{
+		return StripMarkup(pLeague->GetTextForChoice(eDecision, iChoice).c_str());
+	}
+
 	JArr ChoicesJson(CvLeague* pLeague, ResolutionDecisionTypes eDecision, PlayerTypes eDecider)
 	{
 		JArr list;
@@ -46,7 +51,7 @@ namespace
 		{
 			JObj c;
 			c["choice"] = J(choices[i]);
-			c["text"] = J(pLeague->GetTextForChoice(eDecision, choices[i]).c_str());
+			c["text"] = J(ChoiceText(pLeague, eDecision, choices[i]));
 			list.push_back(JVal(c));
 		}
 		return list;
@@ -56,7 +61,7 @@ namespace
 	{
 		JObj o;
 		o["id"] = J(p.GetID());
-		o["name"] = J(pLeague->GetResolutionName(p.GetType(), p.GetID(), p.GetProposerDecision() ? p.GetProposerDecision()->GetDecision() : LeagueHelpers::CHOICE_NONE, true).c_str());
+		o["name"] = J(StripMarkup(pLeague->GetResolutionName(p.GetType(), p.GetID(), p.GetProposerDecision() ? p.GetProposerDecision()->GetDecision() : LeagueHelpers::CHOICE_NONE, true).c_str()));
 		o["proposed_by"] = J(CivName(p.GetProposalPlayer()));
 		o["repeal"] = J(bRepeal);
 		CvResolutionEntry* info = GC.getResolutionInfo(p.GetType());
@@ -91,12 +96,23 @@ namespace
 		{
 			std::string key = it->second.get<std::string>();
 			for(size_t i = 0; i < choices.size(); ++i)
-				if(_stricmp(pLeague->GetTextForChoice(eDecision, choices[i]).c_str(), key.c_str()) == 0) { out = choices[i]; return true; }
+				if(_stricmp(ChoiceText(pLeague, eDecision, choices[i]).c_str(), key.c_str()) == 0) { out = choices[i]; return true; }
 			err = "no choice named '" + key + "'";
 			return false;
 		}
 		err = "choice must be a number or the choice text";
 		return false;
+	}
+
+	std::string CannotVote(CvLeague* pLeague, PlayerTypes e)
+	{
+		if(!pLeague->IsMember(e)) return "you cannot vote: you are not a member of the World Congress";
+		if(!pLeague->IsInSession())
+		{
+			int iTurns = pLeague->GetTurnsUntilSession();
+			return McpFormat("you cannot vote now: the World Congress votes when it meets, in %d turn%s", iTurns, iTurns == 1 ? "" : "s");
+		}
+		return "you cannot vote now: you have used all your votes this session";
 	}
 }
 
@@ -124,7 +140,7 @@ MCP_TOOL(ToolCongress)
 	{
 		JObj a;
 		a["id"] = J(it->GetID());
-		a["name"] = J(pLeague->GetResolutionName(it->GetType(), it->GetID(), it->GetProposerDecision() ? it->GetProposerDecision()->GetDecision() : LeagueHelpers::CHOICE_NONE, true).c_str());
+		a["name"] = J(StripMarkup(pLeague->GetResolutionName(it->GetType(), it->GetID(), it->GetProposerDecision() ? it->GetProposerDecision()->GetDecision() : LeagueHelpers::CHOICE_NONE, true).c_str()));
 		a["enacted_turn"] = J(it->GetTurnEnacted());
 		if(pLeague->CanPropose(e)) a["can_propose_repeal"] = J(pLeague->CanProposeRepeal(it->GetID(), e));
 		active.push_back(JVal(a));
@@ -204,7 +220,7 @@ MCP_TOOL(ToolVoteResolution)
 	CvLeague* pLeague = League(err);
 	if(!pLeague) return JVal();
 	PlayerTypes e = me->GetID();
-	if(!pLeague->CanVote(e)) { err = "you cannot vote now"; return JVal(); }
+	if(!pLeague->CanVote(e)) { err = CannotVote(pLeague, e); return JVal(); }
 	int iId = 0;
 	if(!RequireInt(args, "resolution_id", iId, err)) return JVal();
 	int iVotes = ArgInt(args, "votes", pLeague->GetRemainingVotesForMember(e));
@@ -231,7 +247,7 @@ MCP_TOOL(ToolAbstain)
 	CvLeague* pLeague = League(err);
 	if(!pLeague) return JVal();
 	PlayerTypes e = me->GetID();
-	if(!pLeague->CanVote(e)) { err = "you cannot vote now"; return JVal(); }
+	if(!pLeague->CanVote(e)) { err = CannotVote(pLeague, e); return JVal(); }
 	int iVotes = ArgInt(args, "votes", pLeague->GetRemainingVotesForMember(e));
 	if(iVotes <= 0 || iVotes > pLeague->GetRemainingVotesForMember(e)) { err = "votes out of range"; return JVal(); }
 	pLeague->DoVoteAbstain(e, iVotes);

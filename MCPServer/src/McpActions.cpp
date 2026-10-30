@@ -224,6 +224,7 @@ MCP_TOOL(ToolAttack)
 	if(bPreview)
 	{
 		o["previewed_only"] = J(true);
+		if(!u->canMove()) o["note"] = J("this unit has no moves left this turn, so it can attack next turn");
 		return JVal(o);
 	}
 
@@ -267,7 +268,11 @@ MCP_TOOL(ToolAttack)
 	else
 	{
 		CvCity* cityAfter = p->getPlotCity();
-		if(cityAfter && cityAfter->getOwner() == me->GetID()) o["city_captured"] = J(true);
+		if(cityAfter && cityAfter->getOwner() == me->GetID())
+		{
+			o["city_captured"] = J(true);
+			if(CaptureUndecided(cityAfter)) o["note"] = J("decide its fate with city_task: " + CaptureChoices(me, cityAfter));
+		}
 		else if(cityAfter) { targetHpAfter = cityAfter->GetMaxHitPoints() - cityAfter->getDamage(); o["target_hp"] = J(targetHpAfter); }
 	}
 	// Every attack that ran changed something: the target's health, or the attacker's health or moves.
@@ -285,7 +290,13 @@ MCP_TOOL(ToolCityAttack)
 	CvCity* c = RequireCity(me, args, err);
 	int x = 0, y = 0;
 	if(!c || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
-	if(!c->CanRangeStrikeNow()) { err = "this city cannot attack this turn"; return JVal(); }
+	if(!c->CanRangeStrikeNow())
+	{
+		if(c->IsResistance() || c->IsRazing()) err = "this city cannot attack while in resistance or being razed";
+		else if(c->isMadeAttack()) err = "this city has already attacked this turn";
+		else err = "this city cannot attack now: no enemy is within its range";
+		return JVal();
+	}
 	if(!c->canRangeStrikeAt(x, y)) { err = "no attackable enemy on that tile within the city's range"; return JVal(); }
 	CvPlot* p = GC.getMap().plot(x, y);
 	UnitHandle hDefender = p->getBestDefender(NO_PLAYER, me->GetID(), NULL, true, false, false, true);

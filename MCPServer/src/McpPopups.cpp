@@ -8,10 +8,15 @@
 #include "CvMap.h"
 #include "CvGlobals.h"
 #include "CvTechClasses.h"
+#include "CvCultureClasses.h"
+#include "CvCity.h"
+#include "CvUnit.h"
 #include "CvInfos.h"
 
 using namespace McpTool;
 
+// Never "GenericPopup": it resets itself only through its own buttons, so closing it from outside stops it showing
+// any later question for the rest of the game.
 const char* McpPopupDialogToClose(int iType)
 {
 	switch(iType)
@@ -21,6 +26,9 @@ const char* McpPopupDialogToClose(int iType)
 	case BUTTONPOPUP_NATURAL_WONDER_REWARD: return "NaturalWonderPopup";
 	case BUTTONPOPUP_NEW_ERA: return "NewEraPopup";
 	case BUTTONPOPUP_WONDER_COMPLETED_ACTIVE_PLAYER: return "WonderPopup";
+	case BUTTONPOPUP_GREAT_WORK_COMPLETED_ACTIVE_PLAYER: return "GreatWorkSplash";
+	case BUTTONPOPUP_WHOS_WINNING: return "WhosWinningPopup";
+	case BUTTONPOPUP_LEAGUE_SPLASH: return "LeagueSplash";
 	case BUTTONPOPUP_BARBARIAN_CAMP_REWARD: return "BarbarianCampPopup";
 	case BUTTONPOPUP_GOLDEN_AGE_REWARD: return "GoldenAgePopup";
 	case BUTTONPOPUP_GREAT_PERSON_REWARD: return "GreatPersonRewardPopup";
@@ -96,8 +104,32 @@ std::string McpDescribePopup(PlayerTypes ePlayer, int iType, int iData1, int iDa
 		return McpFormat("Entered the %s", EraName((EraTypes)iData1));
 	case BUTTONPOPUP_WONDER_COMPLETED_ACTIVE_PLAYER:
 		return McpFormat("Completed the wonder %s", BuildingName((BuildingTypes)iData1));
+	case BUTTONPOPUP_GREAT_WORK_COMPLETED_ACTIVE_PLAYER:
+	{
+		CvGameCulture* pCulture = GC.getGame().GetGameCulture();
+		if(iData1 < 0 || iData1 >= pCulture->GetNumGreatWorks()) return "";
+		// A swap's notification passes the civilization the work came from.
+		bool bSwapped = iData2 >= 0 && iData2 < MAX_PLAYERS && iData2 != ePlayer;
+		std::string s = (bSwapped ? "Received the great work " : "Created the great work ") + Localized(pCulture->GetGreatWorkName(iData1).c_str());
+		std::string artist = Localized(pCulture->GetGreatWorkArtist(iData1).c_str());
+		if(!artist.empty()) s += " by " + artist;
+		CvCity* pCity = pCulture->GetGreatWorkCity(iData1);
+		if(pCity) s += McpFormat(", now in %s", pCity->getName().c_str());
+		return s;
+	}
 	case BUTTONPOPUP_BARBARIAN_CAMP_REWARD:
 		return McpFormat("Cleared a barbarian camp: +%d gold", iData1);
+	case BUTTONPOPUP_WHOS_WINNING:
+		return "The game showed its Who's Winning ranking of the civilizations";
+	case BUTTONPOPUP_RETURN_CIVILIAN:
+	{
+		CvUnit* u = (iData1 >= 0 && iData1 < MAX_PLAYERS) ? GET_PLAYER((PlayerTypes)iData1).getUnit(iData3) : NULL;
+		std::string what = u ? McpFormat("a %s (unit id %d)", UnitTypeName(u->getUnitType()), iData3) : std::string("a civilian unit");
+		return McpFormat("Captured %s that belonged to %s; it is yours unless a human gives it back. The game asks on screen, and only a human can answer there; until then, later pop-ups may wait behind the question or never show", what.c_str(), CivName((PlayerTypes)iData2).c_str());
+	}
+	case BUTTONPOPUP_LEAGUE_SPLASH:
+		if(bOption1) return McpFormat("The World Congress was founded, hosted by %s (congress shows when it meets and what is proposed)", CivName((PlayerTypes)iData2).c_str());
+		return McpFormat("The World Congress has called a special session, hosted by %s (congress shows what it votes on)", CivName((PlayerTypes)iData2).c_str());
 	case BUTTONPOPUP_GOLDEN_AGE_REWARD:
 		return "A Golden Age has begun";
 	case BUTTONPOPUP_GREAT_PERSON_REWARD:
@@ -114,14 +146,11 @@ std::string McpDescribePopup(PlayerTypes ePlayer, int iType, int iData1, int iDa
 	}
 	case BUTTONPOPUP_CITY_CAPTURED:
 	{
-		PlayerTypes eMe = ePlayer;
-		CvCity* c = (eMe != NO_PLAYER) ? GET_PLAYER(eMe).getCity(iData1) : NULL;
+		CvCity* c = (ePlayer != NO_PLAYER) ? GET_PLAYER(ePlayer).getCity(iData1) : NULL;
 		std::string s = McpFormat(bOption1 ? "Acquired %s (city id %d) by buying out its city-state" : "Captured %s (city id %d)", c ? c->getName().c_str() : "a city", iData1);
 		if(iData2 > 0) s += McpFormat(", plundering %d gold", iData2);
 		if(iData3 > 0) s += McpFormat(" and %d culture", iData3);
-		s += ". Decide its fate with city_task: annex, puppet, raze";
-		PlayerTypes eOrig = c ? c->getOriginalOwner() : NO_PLAYER;
-		if(c && eOrig != NO_PLAYER && eOrig != eMe && GET_PLAYER(eMe).CanLiberatePlayerCity(eOrig)) s += " or liberate (" + CivName(eOrig) + ")";
+		if(c && CaptureUndecided(c)) s += ". Decide its fate with city_task: " + CaptureChoices(&GET_PLAYER(ePlayer), c);
 		return s;
 	}
 	case BUTTONPOPUP_ADVISOR_COUNSEL:

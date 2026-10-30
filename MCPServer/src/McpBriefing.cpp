@@ -96,6 +96,7 @@ namespace
 			o["their_opinion_of_you"] = J(OpinionName(pDiplo->GetMajorCivOpinion(me->GetID())));
 		}
 		if(pDiplo->IsDenouncedPlayer(me->GetID())) o["denounced_you"] = J(true);
+		if(me->GetDiplomacyAI()->IsDenouncedPlayer(other.GetID())) o["you_denounced_them"] = J(true);
 		if(pDiplo->IsDoFAccepted(me->GetID())) o["declared_friendship"] = J(true);
 		if(bBrief) return JVal(o);
 		o["score"] = J(other.GetScore());
@@ -133,18 +134,41 @@ namespace
 
 	// ------------------------------------------------------------ briefing sections
 
-	JArr BriefingEvents(CvPlayer* me, int iSince)
+	// Other players' notifications carry the turn this player ended, so the default window starts there and
+	// skips, by id (ids only grow), what last turn's briefings already reported.
+	struct NoticesReported
+	{
+		int turn, newest, newestLastTurn;
+		NoticesReported() : turn(-1), newest(-1), newestLastTurn(-1) {}
+		void BeginTurn(int iTurn)
+		{
+			if(turn == iTurn) return;
+			newestLastTurn = (turn == iTurn - 1) ? newest : -1;
+			newest = -1;
+			turn = iTurn;
+		}
+	};
+	std::map<int, NoticesReported> s_noticesReported;
+
+	JArr BriefingEvents(CvPlayer* me, int iSince, bool bSkipReported)
 	{
 		JArr events;
 		CvNotifications* pNotes = me->GetNotifications();
 		if(!pNotes) return events;
+		int iTurn = GC.getGame().getGameTurn();
+		NoticesReported& reported = s_noticesReported[(int)me->GetID()];
+		reported.BeginTurn(iTurn);
 		for(int i = 0; i < pNotes->GetNumNotifications(); ++i)
 		{
-			if(pNotes->GetNotificationTurn(i) < iSince) continue;
+			int iNoteTurn = pNotes->GetNotificationTurn(i);
+			if(iNoteTurn < iSince) continue;
+			int iId = pNotes->GetNotificationID(i);
+			if(iId > reported.newest) reported.newest = iId;
+			if(bSkipReported && iNoteTurn < iTurn && iId <= reported.newestLastTurn) continue;
 			JObj ev;
-			ev["turn"] = J(pNotes->GetNotificationTurn(i));
-			ev["summary"] = J(pNotes->GetNotificationSummary(i).c_str());
-			ev["text"] = J(pNotes->GetNotificationStr(i).c_str());
+			ev["turn"] = J(iNoteTurn);
+			ev["summary"] = J(StripMarkup(pNotes->GetNotificationSummary(i).c_str()));
+			ev["text"] = J(StripMarkup(pNotes->GetNotificationStr(i).c_str()));
 			int x = pNotes->GetNotificationX(i), y = pNotes->GetNotificationY(i);
 			if(x >= 0 && y >= 0) ev["at"] = J(McpFormat("(%d,%d)", x, y));
 			events.push_back(JVal(ev));
@@ -213,7 +237,10 @@ namespace
 		int iLoop = 0;
 		for(CvCity* c = me->firstCity(&iLoop); c; c = me->nextCity(&iLoop))
 		{
-			if(c->getOrderQueueLength() == 0)
+			// The game asks for production only once a captured city's fate is chosen.
+			if(CaptureUndecided(c))
+				pending.push_back(J(CaptureDecision(me, c)));
+			else if(c->getOrderQueueLength() == 0)
 				pending.push_back(J(McpFormat("production: %s (id %d) is building nothing (city_options, set_production)", c->getName().c_str(), c->GetID())));
 			if(c->CanRangeStrikeNow())
 				pending.push_back(J(McpFormat("city_attack: %s can bombard an enemy this turn", c->getName().c_str())));
@@ -300,8 +327,9 @@ namespace
 		int iLoop = 0;
 		for(CvCity* c = me->firstCity(&iLoop); c; c = me->nextCity(&iLoop))
 		{
-			if(c->foodDifference() < 0)
-				warnings.push_back(J(McpFormat("starvation: %s loses %d food per turn", c->getName().c_str(), -c->foodDifference())));
+			int iFoodTimes100 = c->foodDifferenceTimes100();
+			if(iFoodTimes100 < 0)
+				warnings.push_back(J(McpFormat("starvation: %s loses %g food per turn", c->getName().c_str(), -iFoodTimes100 / 100.0)));
 			if(c->getDamage() > 0)
 				warnings.push_back(J(McpFormat("city damaged: %s at %d/%d hp", c->getName().c_str(), c->GetMaxHitPoints() - c->getDamage(), c->GetMaxHitPoints())));
 		}
@@ -340,6 +368,7 @@ namespace
 		econ["culture"] = J(me->getJONSCulture());
 		econ["next_policy_cost"] = J(me->getNextPolicyCost());
 		econ["science_per_turn"] = J(me->GetScience());
+		if(me->isGoldenAge()) econ["golden_age_turns_left"] = J(me->getGoldenAgeTurns());
 		return JVal(econ);
 	}
 }
@@ -347,6 +376,7 @@ namespace
 void McpResetBriefing()
 {
 	s_snapshots.clear();
+	s_noticesReported.clear();
 }
 
 MCP_TOOL(ToolBriefing)
@@ -355,15 +385,16 @@ MCP_TOOL(ToolBriefing)
 	if(!me) return JVal();
 	CvGame& g = GC.getGame();
 	int iTurn = g.getGameTurn();
+	bool bDefaultWindow = !HasArg(args, "since_turn");
 	int iSince = ArgInt(args, "since_turn", iTurn - 1);
 
 	JObj o;
 	o["turn"] = J(iTurn);
 	o["year"] = J(g.getGameTurnYear());
 	o["is_my_turn"] = J(McpIsPlayerTurn(*me));
-	o["end_turn_blocking"] = J(BlockingName(EndTurnBlocking(me)));
+	o["end_turn_blocking"] = J(EndTurnBlockingText(me));
 	o["events_since_turn"] = J(iSince);
-	o["events"] = JVal(BriefingEvents(me, iSince));
+	o["events"] = JVal(BriefingEvents(me, iSince, bDefaultWindow));
 	o["game_messages"] = JVal(BriefingGameMessages(me, iSince));
 	int iUnread = McpBridge::Get().CountUnread(me->GetID());
 	if(iUnread > 0) o["unread_messages"] = J(McpFormat("%d - read them above and call acknowledge_messages before acting", iUnread));
@@ -429,7 +460,7 @@ namespace
 		for(int i = 0; i < GC.getNumBuildInfos(); ++i)
 		{
 			CvBuildInfo* b = GC.getBuildInfo((BuildTypes)i);
-			if(b && b->getTechPrereq() == (int)e) unlocks.push_back(J(McpFormat("worker build: %s (%s)", b->GetDescription(), b->GetType())));
+			if(b && b->getTechPrereq() == (int)e) unlocks.push_back(J(McpFormat("worker build: %s (%s)", BuildName((BuildTypes)i).c_str(), b->GetType())));
 		}
 		o["unlocks"] = JVal(unlocks);
 		return JVal(o);

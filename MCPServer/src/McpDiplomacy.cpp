@@ -287,7 +287,7 @@ namespace
 		r.to = eTo;
 		r.from = eFrom;
 		r.state = eState;
-		r.message = szMessage ? szMessage : "";
+		r.message = StripMarkup(szMessage ? szMessage : "");
 		r.extra = iExtra;
 		r.hasDeal = (pDeal != NULL);
 		if(pDeal) r.deal = *pDeal;
@@ -703,6 +703,7 @@ namespace
 		CvDiplomacyAI* d = other.GetDiplomacyAI();
 		o["declared_friendship"] = J(d->IsDoFAccepted(me->GetID()));
 		o["denounced_you"] = J(d->IsDenouncedPlayer(me->GetID()));
+		o["you_denounced_them"] = J(me->GetDiplomacyAI()->IsDenouncedPlayer(other.GetID()));
 		if(!other.isHuman() && mine.isAtWar(other.getTeam()))
 			o["willing_to_talk_peace"] = J(mine.canChangeWarPeace(other.getTeam()) && d->IsWillingToMakePeaceWithHuman(me->GetID())
 			                              && d->GetTreatyWillingToOffer(me->GetID()) >= PEACE_TREATY_WHITE_PEACE && d->GetTreatyWillingToAccept(me->GetID()) >= PEACE_TREATY_WHITE_PEACE);
@@ -1216,7 +1217,7 @@ MCP_TOOL(ToolDiscuss)
 		if(topic == "stop_settling") o["they_agreed"] = J(d->IsPlayerNoSettleRequestAccepted(me->GetID()));
 		if(topic == "stop_spying") o["they_agreed"] = J(d->IsPlayerStopSpyingRequestAccepted(me->GetID()));
 		if(topic == "ask_friendship") o["they_agreed"] = J(d->IsDoFAccepted(me->GetID()));
-		if(eReply != NO_DIPLO_MESSAGE_TYPE) o["their_reply"] = J(std::string(d->GetDiploStringForMessage(eReply)));
+		if(eReply != NO_DIPLO_MESSAGE_TYPE) o["their_reply"] = J(StripMarkup(d->GetDiploStringForMessage(eReply)));
 	}
 	return JVal(o);
 }

@@ -1,6 +1,7 @@
 -- MCP Server for Bazaar UI add-in: the AI Log window (Game.GetLLMLog) and its chat with teammate
--- seats, popup capture, the mod list, the turn banner for seats, and tile coordinates.
--- Every game popup is reported to the DLL (Game.LLMNotePopup). It stays open
+-- seats, popup capture, leader screens left for a model, the mod list, the turn banner for seats,
+-- and tile coordinates.
+-- Every game popup about what happened in the game is reported to the DLL (Game.LLMNotePopup). It stays open
 -- until the model acknowledges it; the DLL then names the dialog in Game.LLMDialogsToClose.
 include("InstanceManager");
 include("IconSupport");
@@ -292,6 +293,7 @@ Controls.OpenButton:RegisterCallback(Mouse.eLClick, Open);
 Controls.CloseButton:RegisterCallback(Mouse.eLClick, Close);
 
 local g_PendingDismiss = {};
+local g_Stopped = false;
 
 local function GoodyText(popupInfo)
 	local goody = GameInfo.GoodyHuts[popupInfo.Data1];
@@ -306,6 +308,14 @@ local function GoodyText(popupInfo)
 end
 
 local function OnGamePopup(popupInfo)
+	if g_Stopped then
+		return;
+	end
+	-- The game's screens open pop-ups at this priority when the player clicks something to look at (a Great
+	-- Work, an advisor's answer); pop-ups for what happened in the game never come at it.
+	if popupInfo.Priority == PopupPriority.Current then
+		return;
+	end
 	local text = popupInfo.Text or "";
 	if popupInfo.Type == ButtonPopupTypes.BUTTONPOPUP_GOODY_HUT_REWARD then
 		text = GoodyText(popupInfo);
@@ -318,6 +328,71 @@ local function OnGamePopup(popupInfo)
 	Game.LLMNotePopup(popupInfo.Type, popupInfo.Data1 or -1, popupInfo.Data2 or -1, popupInfo.Data3 or -1, popupInfo.Option1 == true, text);
 end
 Events.SerialEventGameMessagePopup.Add(OnGamePopup);
+
+-- A leader screen holds the game until someone leaves it, which a model playing the civilization on screen
+-- cannot do: the plugin passes the leader's words to the model, and the screen is left here, the way its
+-- own Back button does, once it shows. The game hides this window's update while a leader screen is up,
+-- so the watch runs on the application's frames. A conversation the human opens, by clicking a leader or a
+-- spy notification, stays theirs until the leader view closes or the next turn starts; the AI answers a
+-- model's discuss with DISCUSS_HUMAN_INVOKED too, so that state does not mark the human.
+local LEADER_SCREENS = { "/LeaderHeadRoot/DiscussionDialog", "/LeaderHeadRoot" };
+local HUMAN_OPENED = {
+	[DiploUIStateTypes.DIPLO_UI_STATE_DEFAULT_ROOT] = true,
+	[DiploUIStateTypes.DIPLO_UI_STATE_CONFRONT_YOU_KILLED_MY_SPY] = true,
+};
+local LEADER_WATCH_SECONDS = 5;
+local g_LeaderWatch = 0;
+local g_HumanTalking = false;
+
+local function OnLeaderMessage(iPlayer, iDiploUIState, szLeaderMessage)
+	if g_Stopped then
+		return;
+	end
+	if HUMAN_OPENED[iDiploUIState] then
+		g_HumanTalking = true;
+	end
+	if g_HumanTalking then
+		g_LeaderWatch = 0;
+		return;
+	end
+	if Game.LLMTakeLeaderMessage(iPlayer, iDiploUIState, szLeaderMessage or "") then
+		g_LeaderWatch = LEADER_WATCH_SECONDS;
+	end
+end
+Events.AILeaderMessage.Add(OnLeaderMessage);
+
+-- Some screens the human opens never enter the leader view, so the next turn start ends their conversation too.
+local function OnHumanDoneTalking()
+	g_HumanTalking = false;
+end
+Events.LeavingLeaderViewMode.Add(OnHumanDoneTalking);
+Events.ActivePlayerTurnStart.Add(OnHumanDoneTalking);
+
+local function LeaveLeaderScreens(tickCount, timeIncrement)
+	if g_LeaderWatch <= 0 then
+		return;
+	end
+	if g_Stopped or g_HumanTalking then
+		g_LeaderWatch = 0;
+		return;
+	end
+	g_LeaderWatch = g_LeaderWatch - (timeIncrement or 0);
+	local left = false;
+	for _, path in ipairs(LEADER_SCREENS) do
+		local control = ContextPtr:LookUpControl(path);
+		if control ~= nil and not control:IsHidden() then
+			UIManager:DequeuePopup(control);
+			left = true;
+		end
+	end
+	if left then
+		UI.SetLeaderHeadRootUp(false);
+		UI.RequestLeaveLeader();
+		-- tests/ingame/run.py looks for this line in Lua.log.
+		print("LLMLog: left the leader screen for the model playing this civilization");
+	end
+end
+Events.LocalMachineAppUpdate.Add(LeaveLeaderScreens);
 
 local function CollectAcknowledged()
 	local names = Game.LLMDialogsToClose();
@@ -364,18 +439,13 @@ end
 
 UpdateIdentity();
 
-local MAX_MOD_DESCRIPTION = 400;
-
 -- One line per mod: "Name (v N)", a tab, then the description flattened to one line.
 local function ReportActiveMods()
 	local mods = {};
 	for _, v in ipairs(Modding.GetActivatedMods()) do
 		local name = Modding.GetModProperty(v.ID, v.Version, "Name") or v.ID;
 		local description = Modding.GetModProperty(v.ID, v.Version, "Description") or "";
-		description = description:gsub("%[NEWLINE%]", " "):gsub("%s+", " "):gsub("^ ", ""):gsub(" $", "");
-		if #description > MAX_MOD_DESCRIPTION then
-			description = description:sub(1, MAX_MOD_DESCRIPTION) .. "...";
-		end
+		description = description:gsub("%s+", " ");
 		table.insert(mods, string.format("%s (v %d)\t%s", (name:gsub("%s+", " ")), v.Version, description));
 	end
 	Game.LLMSetActiveMods(table.concat(mods, "\n"));
@@ -435,7 +505,7 @@ local function ShowSeatTurnBanner(iPlayerID)
 end
 Events.AIProcessingStartedForPlayer.Add(ShowSeatTurnBanner);
 
-ContextPtr:SetUpdate(function(fDeltaTime)
+local function Update(fDeltaTime)
 	CollectAcknowledged();
 	g_SinceIdentity = g_SinceIdentity + fDeltaTime;
 	if g_SinceIdentity >= 1.0 then
@@ -455,6 +525,27 @@ ContextPtr:SetUpdate(function(fDeltaTime)
 		Refresh();
 		Game.LLMChatSeen();
 	end
+end
+
+-- After a crash Bazaar turns the plugin off and every call to it raises: the first error then closes the
+-- window for good. An error of this window's own, while the plugin still answers, must not stop the relay of
+-- game pop-ups. Either way each error reaches Lua.log once, not every frame.
+local g_LastError = nil;
+ContextPtr:SetUpdate(function(fDeltaTime)
+	local ok, err = pcall(Update, fDeltaTime);
+	if ok then
+		return;
+	end
+	if not pcall(Game.GetLLMIdentity) then
+		g_Stopped = true;
+		ContextPtr:ClearUpdate();
+		Controls.Popup:SetHide(true);
+		Controls.OpenButton:SetHide(true);
+	elseif err == g_LastError then
+		return;
+	end
+	g_LastError = err;
+	error(err, 0);
 end);
 
 ContextPtr:SetInputHandler(function(uiMsg, wParam, lParam)

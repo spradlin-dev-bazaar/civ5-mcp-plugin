@@ -78,7 +78,7 @@ MCP_TOOL(ToolSpies)
 		CvEspionageSpy& spy = pE->m_aSpyList[i];
 		JObj s;
 		s["spy_index"] = J(i);
-		s["name"] = J(me->getCivilizationInfo().getSpyNames(spy.m_iName));
+		s["name"] = J(Localized(spy.GetSpyName(me)));
 		s["rank"] = J(Localized(pE->GetSpyRankName(spy.m_eRank)));
 		s["state"] = J(SpyStateName(spy.m_eSpyState));
 		if(spy.m_bIsDiplomat) s["diplomat"] = J(true);

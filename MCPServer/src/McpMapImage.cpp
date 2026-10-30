@@ -11,6 +11,7 @@
 #include "CvMap.h"
 #include "CvGlobals.h"
 #include "CvInfos.h"
+#include "CvImprovementClasses.h"
 #include "CvGameCoreUtils.h"
 #include <set>
 
@@ -188,7 +189,8 @@ std::string McpRenderMapPng(PlayerTypes eMe, int cx, int cy, int radius, std::st
 			ImprovementTypes eImp = p->getRevealedImprovementType(eTeam);
 			if(eImp != NO_IMPROVEMENT && !city)
 			{
-				std::string name = ImprovementName(eImp);
+				CvImprovementEntry* pImp = GC.getImprovementInfo(eImp);
+				std::string name = (pImp && pImp->IsGoody()) ? "ruins" : ImprovementName(eImp);
 				for(size_t k = 0; k < name.size(); ++k) name[k] = (char)tolower((unsigned char)name[k]);
 				h.bottomLeft = Cut(name, 5);
 			}

@@ -182,7 +182,7 @@ namespace McpTool
 	const char* UnitTypeKey(UnitTypes e) { CvUnitEntry* i = (e != NO_UNIT) ? GC.getUnitInfo(e) : NULL; return i ? i->GetType() : ""; }
 	const char* BuildingName(BuildingTypes e) { CvBuildingEntry* i = (e != NO_BUILDING) ? GC.getBuildingInfo(e) : NULL; return i ? i->GetDescription() : ""; }
 	const char* TechName(TechTypes e) { CvTechEntry* i = (e != NO_TECH) ? GC.getTechInfo(e) : NULL; return i ? i->GetDescription() : ""; }
-	const char* BuildName(BuildTypes e) { CvBuildInfo* i = (e != NO_BUILD) ? GC.getBuildInfo(e) : NULL; return i ? i->GetDescription() : ""; }
+	std::string BuildName(BuildTypes e) { CvBuildInfo* i = (e != NO_BUILD) ? GC.getBuildInfo(e) : NULL; return i ? StripMarkup(i->GetDescription()) : ""; }
 	const char* EraName(EraTypes e) { CvEraInfo* i = (e != NO_ERA) ? GC.getEraInfo(e) : NULL; return i ? i->GetDescription() : ""; }
 	const char* PromotionName(PromotionTypes e) { CvPromotionEntry* i = (e != NO_PROMOTION) ? GC.getPromotionInfo(e) : NULL; return i ? i->GetDescription() : ""; }
 
@@ -194,10 +194,55 @@ namespace McpTool
 		return p.getCivilizationShortDescription();
 	}
 
+	// Game markup ([ICON_...], [COLOR_...], [LINK=...], [NEWLINE]) is a [ then a capital or \; other brackets stay.
+	static bool MarkupStartsAt(const std::string& s, size_t i)
+	{
+		return s[i] == '[' && i + 1 < s.size() && (isupper((unsigned char)s[i + 1]) || s[i + 1] == '\\') && s.find(']', i) != std::string::npos;
+	}
+
+	static bool EndsWith(const std::string& s, const char* tail)
+	{
+		size_t n = strlen(tail);
+		return s.size() >= n && s.compare(s.size() - n, n, tail) == 0;
+	}
+
+	std::string StripMarkup(const std::string& s)
+	{
+		std::string out;
+		bool bTag = false;
+		for(size_t i = 0; i < s.size(); ++i)
+		{
+			char ch = s[i];
+			if(!bTag && MarkupStartsAt(s, i))
+			{
+				bTag = true;
+				if(s.compare(i, 9, "[NEWLINE]") == 0)
+				{
+					if(!EndsWith(out, "; "))
+					{
+						if(EndsWith(out, " ")) out.erase(out.size() - 1);
+						out += "; ";
+					}
+				}
+				// An icon can sit between a number and a word ("+2[ICON_FOOD]in").
+				else if((s.compare(i, 6, "[ICON_") == 0 || s.compare(i, 5, "[TAB]") == 0) && !out.empty() && !EndsWith(out, " ")) out += ' ';
+				continue;
+			}
+			if(bTag && ch == ']') { bTag = false; continue; }
+			if(bTag) continue;
+			if(isspace((unsigned char)ch)) { if(!out.empty() && out[out.size() - 1] != ' ') out += ' '; continue; }
+			out += ch;
+		}
+		size_t b = out.find_first_not_of(" ;");
+		if(b == std::string::npos) return "";
+		size_t e = out.find_last_not_of(" ;");
+		return out.substr(b, e - b + 1);
+	}
+
 	std::string Localized(const char* szKey)
 	{
 		if(!szKey || !*szKey) return "";
-		return GetLocalizedText(szKey).c_str();
+		return StripMarkup(GetLocalizedText(szKey).c_str());
 	}
 
 	UnitTypes FindUnitType(const std::string& key)
@@ -259,7 +304,7 @@ namespace McpTool
 		for(int i = 0; i < GC.getNumBuildInfos(); ++i)
 		{
 			CvBuildInfo* e = GC.getBuildInfo((BuildTypes)i);
-			if(e && MatchesKey(e->GetType(), e->GetDescription(), key)) return (BuildTypes)i;
+			if(e && MatchesKey(e->GetType(), BuildName((BuildTypes)i).c_str(), key)) return (BuildTypes)i;
 		}
 		return NO_BUILD;
 	}
@@ -592,7 +637,7 @@ namespace McpTool
 			{
 				if(m->eMissionType == CvTypes::getMISSION_MOVE_TO()) return McpFormat("moving to (%d,%d); continues when the turn ends", m->iData1, m->iData2);
 				if(m->eMissionType == CvTypes::getMISSION_ROUTE_TO()) return McpFormat("building a route to (%d,%d)", m->iData1, m->iData2);
-				if(m->eMissionType == CvTypes::getMISSION_BUILD()) return McpFormat("working: %s", BuildName((BuildTypes)m->iData1));
+				if(m->eMissionType == CvTypes::getMISSION_BUILD()) return "working: " + BuildName((BuildTypes)m->iData1);
 			}
 			return "on a mission";
 		}
@@ -703,6 +748,54 @@ namespace McpTool
 		return true;
 	}
 
+	bool CaptureUndecided(CvCity* c)
+	{
+		// The game's flag for an acquired city whose fate is not chosen yet: annex, puppet and raze clear it.
+		return c->IsIgnoreCityForHappiness();
+	}
+
+	PlayerTypes LiberationTarget(CvPlayer* me, CvCity* c)
+	{
+		// CanLiberatePlayerCity allows any living founder at any time; the game's capture screen offers liberation only while
+		// the fate is open, and never to the civilization the city was taken from.
+		if(!CaptureUndecided(c)) return NO_PLAYER;
+		PlayerTypes eOrig = c->getOriginalOwner();
+		if(eOrig == NO_PLAYER || eOrig == me->GetID() || eOrig == c->getPreviousOwner()) return NO_PLAYER;
+		return me->CanLiberatePlayerCity(eOrig) ? eOrig : NO_PLAYER;
+	}
+
+	std::string CaptureDecision(CvPlayer* me, CvCity* c)
+	{
+		return McpFormat("captured city: decide the fate of %s (id %d) with city_task: ", c->getName().c_str(), c->GetID()) + CaptureChoices(me, c);
+	}
+
+	std::string PendingCaptureDecision(CvPlayer* me)
+	{
+		int iLoop = 0;
+		for(CvCity* c = me->firstCity(&iLoop); c; c = me->nextCity(&iLoop))
+			if(CaptureUndecided(c)) return CaptureDecision(me, c);
+		return "";
+	}
+
+	std::string EndTurnBlockingText(CvPlayer* me)
+	{
+		std::string capture = PendingCaptureDecision(me);
+		return capture.empty() ? BlockingName(EndTurnBlocking(me)) : capture;
+	}
+
+	std::string CaptureChoices(CvPlayer* me, CvCity* c)
+	{
+		std::vector<std::string> v;
+		if(!me->GetPlayerTraits()->IsNoAnnexing()) v.push_back("annex");
+		v.push_back("puppet");
+		if(me->canRaze(c)) v.push_back("raze");
+		PlayerTypes eFree = LiberationTarget(me, c);
+		if(eFree != NO_PLAYER) v.push_back("liberate (" + CivName(eFree) + ")");
+		std::string s = v[0];
+		for(size_t i = 1; i < v.size(); ++i) s += (i + 1 == v.size() ? " or " : ", ") + v[i];
+		return s;
+	}
+
 	JVal CityJson(CvCity* c)
 	{
 		JObj o;
@@ -715,8 +808,12 @@ namespace McpTool
 		if(c->IsPuppet()) o["puppet"] = J(true);
 		if(c->IsResistance()) o["resistance_turns_left"] = J(c->GetResistanceTurns());
 		if(c->IsRazing()) o["razing_turns_left"] = J(c->GetRazingTurns());
-		o["food_surplus_per_turn"] = J(c->foodDifference());
-		o["turns_to_grow"] = J(c->getFoodTurnsLeft());
+		int iFoodTimes100 = c->foodDifferenceTimes100();
+		o["food_surplus_per_turn"] = J(iFoodTimes100 / 100.0);
+		if(iFoodTimes100 > 0) o["turns_to_grow"] = J(c->getFoodTurnsLeft());
+		else if(iFoodTimes100 < 0) o["not_growing"] = J("it is starving, and shrinks when its stored food runs out");
+		else if(c->isFoodProduction()) o["not_growing"] = J("its surplus food goes into what it is building");
+		else o["not_growing"] = J("it has no surplus food, or unhappiness stops its growth");
 		o["focus"] = J(FocusName(c->GetCityCitizens()->GetFocusType()));
 
 		JObj prod;
@@ -724,6 +821,11 @@ namespace McpTool
 		{
 			prod["name"] = J("nothing - choose with set_production");
 			prod["progress"] = J(c->getProduction());
+		}
+		else if(c->isProductionProcess())
+		{
+			prod["name"] = J(c->getProductionName());
+			prod["ongoing"] = J("the city converts its production every turn until you set something else");
 		}
 		else
 		{

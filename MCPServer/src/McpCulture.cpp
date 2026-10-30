@@ -229,7 +229,7 @@ MCP_TOOL(ToolGreatWorks)
 				sl["slot"] = J(s);
 				if(idx >= 0)
 				{
-					sl["work"] = J(pg->GetGreatWorkName(idx).c_str());
+					sl["work"] = J(Localized(pg->GetGreatWorkName(idx).c_str()));
 					sl["era"] = J(pg->GetGreatWorkEra(idx).c_str());
 					sl["creator"] = J(CivName(pg->GetGreatWorkCreator(idx)));
 				}

@@ -29,7 +29,7 @@ namespace
 	{
 		int id;
 		int turn;
-		PlayerTypes to;   // the seat it is for
+		PlayerTypes to;   // the civilization it is for: a seat, or the one on screen a model plays
 		PlayerTypes from;
 		DiploUIStateTypes state;
 		std::string message;
@@ -259,21 +259,21 @@ namespace
 		return "";
 	}
 
-	// Drops the seat's requests the game can no longer carry out and tells the seat why, as a
+	// Drops a civilization's requests the game can no longer carry out and tells its model why, as a
 	// game message, so an offer never sits in the list only to fail when it is accepted.
 	// Returns the notices, for a tool that wants to repeat them in its own reply.
-	JArr PruneStale(PlayerTypes eSeat)
+	JArr PruneStale(PlayerTypes ePlayer)
 	{
 		JArr withdrawn;
 		for(size_t i = s_requests.size(); i-- > 0;)
 		{
 			DiploRequest& r = s_requests[i];
-			if(r.to != eSeat) continue;
+			if(r.to != ePlayer) continue;
 			std::string why = StaleReason(r);
 			if(why.empty()) continue;
 			std::string text = McpFormat("%s withdrew request #%d (%s): %s", CivName(r.from).c_str(), r.id, StateName(r.state), why.c_str());
 			s_requests.erase(s_requests.begin() + i);
-			McpBridge::Get().NotePopup(eSeat, MCP_POPUP_TEXT, 0, 0, 0, false, text, false);
+			McpBridge::Get().NotePopup(ePlayer, MCP_POPUP_TEXT, 0, 0, 0, false, text, false);
 			withdrawn.push_back(J(text));
 		}
 		return withdrawn;
@@ -287,7 +287,7 @@ namespace
 		r.to = eTo;
 		r.from = eFrom;
 		r.state = eState;
-		r.message = szMessage ? szMessage : "";
+		r.message = StripMarkup(szMessage ? szMessage : "");
 		r.extra = iExtra;
 		r.hasDeal = (pDeal != NULL);
 		if(pDeal) r.deal = *pDeal;
@@ -703,6 +703,7 @@ namespace
 		CvDiplomacyAI* d = other.GetDiplomacyAI();
 		o["declared_friendship"] = J(d->IsDoFAccepted(me->GetID()));
 		o["denounced_you"] = J(d->IsDenouncedPlayer(me->GetID()));
+		o["you_denounced_them"] = J(me->GetDiplomacyAI()->IsDenouncedPlayer(other.GetID()));
 		if(!other.isHuman() && mine.isAtWar(other.getTeam()))
 			o["willing_to_talk_peace"] = J(mine.canChangeWarPeace(other.getTeam()) && d->IsWillingToMakePeaceWithHuman(me->GetID())
 			                              && d->GetTreatyWillingToOffer(me->GetID()) >= PEACE_TREATY_WHITE_PEACE && d->GetTreatyWillingToAccept(me->GetID()) >= PEACE_TREATY_WHITE_PEACE);
@@ -733,16 +734,16 @@ void McpNoteDealResolved(PlayerTypes eFrom, PlayerTypes eTo, PlayerTypes eActBy,
 	PlayerTypes ends[2] = { eFrom, eTo };
 	for(int i = 0; i < 2; ++i)
 	{
-		PlayerTypes eSeat = ends[i];
-		if(!McpIsSeat(eSeat) || eActBy == eSeat) continue; // the tool that acted already reported the result
-		PlayerTypes eOther = (eFrom == eSeat) ? eTo : eFrom;
-		std::string what = (eFrom == eSeat) ? "your offer" : "their offer";
+		PlayerTypes ePlayer = ends[i];
+		if(!McpPlayedByModel(ePlayer) || eActBy == ePlayer) continue; // the tool that acted already reported the result
+		PlayerTypes eOther = (eFrom == ePlayer) ? eTo : eFrom;
+		std::string what = (eFrom == ePlayer) ? "your offer" : "their offer";
 		std::string text;
 		if(!bStillValid) text = CivName(eOther) + ": " + what + " expired; something in it is no longer available";
 		else if(bAccepted) text = CivName(eOther) + " accepted " + what + "; the deal is in force";
 		else if(eActBy == eFrom) text = CivName(eOther) + " withdrew " + what;
 		else text = CivName(eOther) + " declined " + what;
-		McpBridge::Get().NotePopup(eSeat, MCP_POPUP_TEXT, 0, 0, 0, false, text, false);
+		McpBridge::Get().NotePopup(ePlayer, MCP_POPUP_TEXT, 0, 0, 0, false, text, false);
 	}
 }
 
@@ -760,7 +761,7 @@ namespace
 bool McpInterceptRequest(PlayerTypes eFrom, PlayerTypes eTo, DiploUIStateTypes eState, const char* szMessage, int iExtraGameData)
 {
 	if(DropForIdleHuman(eTo)) return true;
-	if(!McpIsSeat(eTo)) return false;
+	if(!McpPlayedByModel(eTo)) return false;
 	Record(eTo, eFrom, eState, szMessage, iExtraGameData, NULL);
 	return true;
 }
@@ -768,7 +769,7 @@ bool McpInterceptRequest(PlayerTypes eFrom, PlayerTypes eTo, DiploUIStateTypes e
 bool McpInterceptDealRequest(PlayerTypes eFrom, PlayerTypes eTo, const CvDeal* pDeal, DiploUIStateTypes eState, const char* szMessage)
 {
 	if(DropForIdleHuman(eTo)) return true;
-	if(!McpIsSeat(eTo)) return false;
+	if(!McpPlayedByModel(eTo)) return false;
 	Record(eTo, eFrom, eState, szMessage, -1, pDeal);
 	return true;
 }
@@ -1216,7 +1217,7 @@ MCP_TOOL(ToolDiscuss)
 		if(topic == "stop_settling") o["they_agreed"] = J(d->IsPlayerNoSettleRequestAccepted(me->GetID()));
 		if(topic == "stop_spying") o["they_agreed"] = J(d->IsPlayerStopSpyingRequestAccepted(me->GetID()));
 		if(topic == "ask_friendship") o["they_agreed"] = J(d->IsDoFAccepted(me->GetID()));
-		if(eReply != NO_DIPLO_MESSAGE_TYPE) o["their_reply"] = J(std::string(d->GetDiploStringForMessage(eReply)));
+		if(eReply != NO_DIPLO_MESSAGE_TYPE) o["their_reply"] = J(StripMarkup(d->GetDiploStringForMessage(eReply)));
 	}
 	return JVal(o);
 }

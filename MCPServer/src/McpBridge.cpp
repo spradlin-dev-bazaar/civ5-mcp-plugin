@@ -167,6 +167,8 @@ struct McpBridge::Impl
 		return last != 0 && GetTickCount() - last < MCP_GAME_IDLE_MS;
 	}
 	void Touch(const std::string& token); // creates the session when new
+	void KeepAlive(const std::string& token); // an ended session stays ended
+	void EndSession(const std::string& token);
 	// The session's flags; false when it no longer exists.
 	bool Flags(const std::string& token, bool& bMyTurn, int& iDiploSeq, bool& bChatWaiting, int& iSeat);
 
@@ -207,6 +209,23 @@ void McpBridge::Impl::Touch(const std::string& token)
 	Session& s = sessions[token];
 	s.info.token = token;
 	s.lastSeenMs = GetTickCount();
+	LeaveCriticalSection(&lock);
+}
+
+void McpBridge::Impl::KeepAlive(const std::string& token)
+{
+	EnterCriticalSection(&lock);
+	std::map<std::string, Session>::iterator it = sessions.find(token);
+	if(it != sessions.end()) it->second.lastSeenMs = GetTickCount();
+	LeaveCriticalSection(&lock);
+}
+
+// A seat the session held stays claimed, waiting for a player, so the same model can take it back at once.
+// Safe during the session's own job too: the job then finds no CurrentSession() and carries on.
+void McpBridge::Impl::EndSession(const std::string& token)
+{
+	EnterCriticalSection(&lock);
+	sessions.erase(token);
 	LeaveCriticalSection(&lock);
 }
 
@@ -555,7 +574,7 @@ void McpBridge::Impl::UpdateSessions()
 	for(std::map<std::string, Session>::iterator it = sessions.begin(); it != sessions.end();)
 	{
 		Session& s = it->second;
-		if(now - s.lastSeenMs > MCP_SESSION_EXPIRE_MS && !(inJob && it->first == currentToken))
+		if(now - s.lastSeenMs > MCP_SESSION_EXPIRE_MS)
 		{
 			sessions.erase(it++);
 			continue;
@@ -671,7 +690,7 @@ void McpBridge::Impl::DrainPopups()
 		popup.turn = GC.getGame().getGameTurn();
 		popup.player = p.onScreen ? (int)eActive : p.player;
 		popup.dialog = p.onScreen ? McpPopupDialogToClose(p.type) : "";
-		popup.text = McpDescribePopup((PlayerTypes)popup.player, p.type, p.data1, p.data2, p.data3, p.option1, p.text);
+		popup.text = McpTool::StripMarkup(McpDescribePopup((PlayerTypes)popup.player, p.type, p.data1, p.data2, p.data3, p.option1, p.text));
 		if(popup.text.empty())
 		{
 			if(popup.dialog.empty()) continue;
@@ -887,10 +906,18 @@ void McpBridge::Impl::HandleHttp(const McpHttpRequest& req, McpHttpResponse& res
 		res.body = "{\"error\":\"the MCP endpoint is /mcp\"}";
 		return;
 	}
+	if(req.method == "DELETE")
+	{
+		std::map<std::string, std::string>::const_iterator itSession = req.headers.find("mcp-session-id");
+		if(itSession != req.headers.end()) EndSession(itSession->second);
+		res.status = 200;
+		res.body.clear();
+		return;
+	}
 	if(req.method != "POST")
 	{
 		res.status = 405;
-		res.body = "{\"error\":\"only POST is supported\"}";
+		res.body = "{\"error\":\"only POST and DELETE are supported\"}";
 		return;
 	}
 
@@ -906,9 +933,9 @@ void McpBridge::Impl::HandleHttp(const McpHttpRequest& req, McpHttpResponse& res
 	}
 
 	// The session is whatever Mcp-Session-Id the client sends; initialize starts a fresh
-	// one and hands its id back. An id the server no longer knows (the game restarted)
-	// simply starts a session under that id: the model then names itself again. A client
-	// that never sends one shares the session with the empty id.
+	// one and hands its id back. An id the server no longer knows (the game restarted, or
+	// the client ended it) simply starts a session under that id: the model then names itself
+	// again. A client that never sends one shares the session with the empty id.
 	std::string token;
 	std::map<std::string, std::string>::const_iterator itSession = req.headers.find("mcp-session-id");
 	if(itSession != req.headers.end()) token = itSession->second;
@@ -923,7 +950,7 @@ void McpBridge::Impl::HandleHttp(const McpHttpRequest& req, McpHttpResponse& res
 
 	bool bIsNotification = false;
 	picojson::value response = HandleRpc(request, token, bIsNotification);
-	Touch(token); // a long wait counts as presence
+	KeepAlive(token); // a long wait counts as presence
 	if(bIsNotification)
 	{
 		res.status = 202;
@@ -1121,7 +1148,7 @@ picojson::value McpBridge::Impl::CallTool(const std::string& token, const std::s
 		while(!shuttingDown && !(GameRunning() && SessionWakes(token, iSeqAtStart)) && GetTickCount() - start < (DWORD)(timeout * 1000.0))
 		{
 			Sleep(250);
-			Touch(token);
+			KeepAlive(token);
 		}
 	}
 
@@ -1152,7 +1179,7 @@ picojson::value McpBridge::Impl::AdvanceRound(const std::string& token, const pi
 	{
 		bool bMyTurn = false, bChatWaiting = false;
 		int iDiploSeq = 0, iSeat = 0;
-		Flags(token, bMyTurn, iDiploSeq, bChatWaiting, iSeat);
+		if(!Flags(token, bMyTurn, iDiploSeq, bChatWaiting, iSeat)) break;
 		if(!bTurnEnded)
 		{
 			// Give the turn a few seconds to close before watching for it to come back.
@@ -1167,7 +1194,7 @@ picojson::value McpBridge::Impl::AdvanceRound(const std::string& token, const pi
 			bSkipped = true;
 		}
 		Sleep(bTurnEnded ? 250 : 100);
-		Touch(token);
+		KeepAlive(token);
 	}
 	picojson::object none;
 	r = RunOnGameThread(token, MCP_TOOL_STATUS, none, error);

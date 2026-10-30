@@ -5,11 +5,11 @@
 
 class CvDeal;
 
-// Diplomacy for the model's seat without the leader screens. Game thread only.
+// Diplomacy for the civilizations models play, without the leader screens. Game thread only.
 
 // Called by the game where it would open a leader screen for the player on
-// screen. Returns true when the request was recorded for the model's off-screen
-// seat instead, so the game must not queue or show it.
+// screen. Returns true when the request was recorded for a civilization a model
+// plays instead (a seat, or the one on screen), so the game must not queue or show it.
 bool McpInterceptRequest(PlayerTypes eFrom, PlayerTypes eTo, DiploUIStateTypes eState, const char* szMessage, int iExtraGameData);
 bool McpInterceptDealRequest(PlayerTypes eFrom, PlayerTypes eTo, const CvDeal* pDeal, DiploUIStateTypes eState, const char* szMessage);
 

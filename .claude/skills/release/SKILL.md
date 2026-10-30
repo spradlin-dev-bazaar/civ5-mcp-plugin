@@ -33,7 +33,9 @@ After the user merges the pull request, switch to main and bring it up to date w
 
 ## 4. Check in the game
 
-Ask the user to install the package from `Build\release\<version>`, not from the build folders, with the Bazaar release it names, as a player would. Then check that:
+First run the scripted checks against the release's package, which plays the test save over MCP with nobody at the keyboard (`tests/ingame/README.md` says what it needs): `python tests\ingame\run.py Build\release\<version>\MCP-Server-for-Bazaar-<version>.civ5mod`. Every check must pass.
+
+Then ask the user to install the package from `Build\release\<version>`, not from the build folders, with the Bazaar release it names, as a player would. Then check that:
 
 - the Plugins screen shows "MCP Server for Bazaar <version>";
 - a model connects at http://127.0.0.1:7676/mcp, plays a turn, and the AI Log shows it;

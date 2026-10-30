@@ -189,7 +189,7 @@ MCP_TOOL(ToolStatus)
 	std::string waiting = McpDiploWaitingNote();
 	if(!waiting.empty()) o["diplomacy_waiting"] = J(waiting);
 	o["ai_processing"] = J(AiProcessing());
-	o["end_turn_blocking"] = J(BlockingName(EndTurnBlocking(me)));
+	o["end_turn_blocking"] = J(EndTurnBlockingText(me));
 	o["units_needing_orders"] = J(me->GetCountReadyUnits());
 	std::vector<std::string> chat = McpBridge::Get().TakeChat((int)me->GetID());
 	if(!chat.empty())
@@ -253,7 +253,7 @@ MCP_TOOL(ToolOverview)
 	o["num_units"] = J(me->getNumUnits());
 	o["military_units"] = J(me->getNumMilitaryUnits());
 	o["units_supported_free"] = J(me->GetNumUnitsSupplied());
-	o["end_turn_blocking"] = J(BlockingName(EndTurnBlocking(me)));
+	o["end_turn_blocking"] = J(EndTurnBlockingText(me));
 	o["cities"] = JVal(CitiesJson(me));
 	o["units"] = JVal(UnitsJson(me));
 	return JVal(o);
@@ -613,7 +613,6 @@ MCP_TOOL(ToolMoveUnit)
 			return JVal();
 		}
 	}
-	if(!u->canMove()) { err = "unit has no moves left this turn; the order can be given next turn"; return JVal(); }
 	int iTurns = 0;
 	if(!u->GeneratePath(dest, 0, false, &iTurns))
 	{
@@ -635,12 +634,14 @@ MCP_TOOL(ToolMoveUnit)
 		}
 		JObj o;
 		o["previewed_only"] = J(true);
+		if(!u->canMove()) o["note"] = J("this unit has no moves left this turn; give the order next turn");
 		o["turns"] = J(iTurns);
 		o["path"] = JVal(path);
 		CvPlot* pEnd = u->GetPathEndTurnPlot();
 		if(pEnd) o["this_turn_ends_at"] = J(McpFormat("(%d,%d)", pEnd->getX(), pEnd->getY()));
 		return JVal(o);
 	}
+	if(!RequireMoves(u, err)) return JVal();
 	int fromX = u->getX(), fromY = u->getY();
 	{
 		NetMessageScope scope;
@@ -659,6 +660,25 @@ MCP_TOOL(ToolMoveUnit)
 	return JVal(o);
 }
 
+namespace
+{
+	// An order can use the unit up or get it killed (a missionary's last spread, a great person's improvement, a nuke,
+	// a fighter shot down on a sweep), so the unit is looked up again by id, never read through u afterwards.
+	void PushOrderAndReport(JObj& o, CvPlayer* me, CvUnit* u, MissionTypes eMission, int iData1, int iData2)
+	{
+		int iUnit = u->GetID();
+		std::string name = UnitTypeName(u->getUnitType());
+		{
+			NetMessageScope scope;
+			u->PushMission(eMission, iData1, iData2, 0, false, true);
+		}
+		o["ok"] = J(true);
+		CvUnit* after = me->getUnit(iUnit);
+		if(!after || after->isDelayedDeath() || !after->plot()) o["unit_gone"] = J("the " + name + " is gone");
+		else o["unit"] = UnitJson(after);
+	}
+}
+
 MCP_TOOL(ToolUnitAction)
 {
 	CvPlayer* me = MeActing(err);
@@ -675,10 +695,7 @@ MCP_TOOL(ToolUnitAction)
 		BuildTypes eBuild = FindBuildType(key);
 		if(eBuild == NO_BUILD) { err = "unknown build type '" + key + "' (use unit_options to list builds_here)"; return JVal(); }
 		if(!u->canBuild(p, eBuild)) { err = "cannot do that build on this tile (wrong unit, tech missing, or terrain)"; return JVal(); }
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_BUILD(), eBuild, -1, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_BUILD(), eBuild, -1);
 		return JVal(o);
 	}
 
@@ -713,10 +730,7 @@ MCP_TOOL(ToolUnitAction)
 		int x = 0, y = 0;
 		if(!RequireMoves(u, err) || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
 		if(!u->canRebaseAt(p, x, y)) { err = "this unit cannot rebase there (not an aircraft, out of range, or no city or carrier of yours at the tile)"; return JVal(); }
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_REBASE(), x, y, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_REBASE(), x, y);
 		return JVal(o);
 	}
 	if(action == "air_sweep")
@@ -724,10 +738,7 @@ MCP_TOOL(ToolUnitAction)
 		int x = 0, y = 0;
 		if(!RequireMoves(u, err) || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
 		if(!u->canAirSweepAt(x, y)) { err = "this unit cannot sweep that tile (not a fighter, out of range, or it already attacked this turn)"; return JVal(); }
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_AIR_SWEEP(), x, y, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_AIR_SWEEP(), x, y);
 		return JVal(o);
 	}
 	if(action == "paradrop")
@@ -735,10 +746,7 @@ MCP_TOOL(ToolUnitAction)
 		int x = 0, y = 0;
 		if(!RequireMoves(u, err) || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
 		if(!u->canParadropAt(p, x, y)) { err = "this unit cannot drop there (not a paratrooper, must start in your territory, target within range and not enemy-held)"; return JVal(); }
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_PARADROP(), x, y, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_PARADROP(), x, y);
 		return JVal(o);
 	}
 	if(action == "nuke")
@@ -758,10 +766,7 @@ MCP_TOOL(ToolUnitAction)
 				return JVal();
 			}
 		}
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_NUKE(), x, y, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_NUKE(), x, y);
 		return JVal(o);
 	}
 	if(action == "disband")
@@ -787,20 +792,9 @@ MCP_TOOL(ToolUnitAction)
 			return JVal();
 		}
 		if(def.needsMoves && !RequireMoves(u, err)) return JVal();
-		{
-			NetMessageScope scope;
-			u->PushMission(def.mission(), -1, -1, 0, false, true);
-		}
-		o["ok"] = J(true);
-		if(action == "found_city")
-		{
-			CvCity* c = p->getPlotCity();
-			if(c) o["city_founded"] = J(c->getName().c_str());
-		}
-		else
-		{
-			o["unit"] = UnitJson(u);
-		}
+		PushOrderAndReport(o, me, u, def.mission(), -1, -1);
+		CvCity* c = (action == "found_city") ? p->getPlotCity() : NULL;
+		if(c) o["city_founded"] = J(c->getName().c_str());
 		return JVal(o);
 	}
 
@@ -889,6 +883,8 @@ MCP_TOOL(ToolEndTurn)
 	if(!me) return JVal();
 	CvGame& g = GC.getGame();
 	bool bForce = ArgBool(args, "force", false);
+	std::string capture = PendingCaptureDecision(me);
+	if(!capture.empty()) { err = "end of turn blocked - " + capture; return JVal(); }
 	EndTurnBlockingTypes eBlock = EndTurnBlocking(me);
 	bool bIdleUnits = (eBlock == ENDTURN_BLOCKING_UNITS);
 	if(eBlock != NO_ENDTURN_BLOCKING_TYPE && !(bIdleUnits && bForce))
@@ -1139,7 +1135,7 @@ namespace
 		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 55), then returns status. Call it again if is_my_turn is still false.",
 		  "{\"type\":\"object\",\"properties\":{\"timeout_seconds\":{\"type\":\"number\"}}}", ToolStatus, LOG_NONE, true },
 		{ "briefing",
-		  "Start every turn with this: what happened since your last turn, game messages you must acknowledge, decisions waiting for you, nearby enemies, economy warnings, and a diplomacy snapshot. Optional since_turn widens the event window.",
+		  "Start every turn with this: what happened since your last turn, game messages you must acknowledge, decisions waiting for you, nearby enemies, economy warnings, and a diplomacy snapshot. Events from last turn that a briefing for this civilization showed during that turn, even to a session before yours, are left out; since_turn shows every event from that turn on.",
 		  "{\"type\":\"object\",\"properties\":{\"since_turn\":{\"type\":\"integer\"}}}", ToolBriefing, LOG_NONE, false },
 		{ "overview",
 		  "Your empire at a glance: treasury, yields, happiness, research, every city and every unit with its activity.",
@@ -1311,7 +1307,7 @@ namespace
 		  "TESTING ONLY (needs testing_mode enabled). Ends your turn, ends the on-screen human's turn when it opens, and waits for your next turn (about a minute at most). Returns status plus round_advanced / turn_reopened.",
 		  "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"},\"force\":{\"type\":\"boolean\"}}}", NULL, LOG_TURN, false },
 		{ "city_task",
-		  "Decide a city's fate or status: annex, puppet, raze, stop_razing or liberate (give a captured city back to its original owner).",
+		  "Decide a city's fate or status: annex, puppet, raze, stop_razing or liberate (right after a capture, give the city back to the civilization that founded it, if you took it from someone else).",
 		  "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"},\"task\":{\"type\":\"string\"}},\"required\":[\"city_id\",\"task\"]}", ToolCityTask, LOG_CITY, false },
 		{ "set_identity",
 		  "Name yourself; call it first on every connection. provider is your maker's product (Claude, ChatGPT, Gemini), model your model family (Opus, Fable, GPT) and version its version (5.5). The game shows it after your leader's name, e.g. Dido (Claude Opus 5.5), and, while you are the only model in the game, on the log button.",
@@ -1350,7 +1346,7 @@ namespace
 		  "The Victory Progress screen: which victories are enabled; original capitals held by each civilization (Domination); your spaceship projects (Science); civilizations you are influential over (Culture); votes held and needed (Diplomatic).",
 		  SCHEMA_EMPTY, ToolVictoryProgress, LOG_NONE, false },
 		{ "map_image",
-		  "A picture of the explored tiles within radius (default 5, max 8) of a point (default: your capital), drawn like the game's strategic view. Hexes in rows, odd rows half a hex east, y growing northward; each row's y is written at the left edge and the top row's x values along the top. Terrain by color: greens grass, brown-tan plains, pale yellow desert, grey-blue tundra, white snow, light blue coast, dark blue ocean; darker shade = hills; dark grey hex with MTN in the middle = mountain. Hexes inside someone's borders are covered in a grid of dots in the owner's color, and the territory's outline is a thick line in that color just inside its edge. Inside each hex, three centered rows: its coordinates x,y in bold on top (followed by +N when more units are stacked there than drawn); the city, units or MTN in the middle; and along the bottom what is on the ground: a short resource name (Iron, Oil, Coal, Horses...), a feature letter (F forest, J jungle, M marsh, O oasis, fp flood plains, ice, X fallout, atl atoll, NW natural wonder) with h added for hills (Fh = forest on hills, h alone = bare hills), and an improvement (the first letters of its name: farm, mine, trade, plant...). Bright cyan edges = rivers; dark brown lines with a dot = roads. Cities are labeled boxes in the owner's color (units inside a city are not drawn). Units are circles in the owner's color with a short name; the ring says whose: white yours, green a teammate's, red an enemy's, grey anyone else's; +N when more are stacked than shown. Hatched hexes are explored but out of sight now (no units shown); a dark hex with ? was never explored. The legend names each civilization's color and relation. The text beside the picture lists the cities and units in it with exact coordinates. Use it to see borders, fronts and where armies stand; use map for exact tile details.",
+		  "A picture of the explored tiles within radius (default 5, max 8) of a point (default: your capital), drawn like the game's strategic view. Hexes in rows, odd rows half a hex east, y growing northward; each row's y is written at the left edge and the top row's x values along the top. Terrain by color: greens grass, brown-tan plains, pale yellow desert, grey-blue tundra, white snow, light blue coast, dark blue ocean; darker shade = hills; dark grey hex with MTN in the middle = mountain. Hexes inside someone's borders are covered in a grid of dots in the owner's color, and the territory's outline is a thick line in that color just inside its edge. Inside each hex, three centered rows: its coordinates x,y in bold on top (followed by +N when more units are stacked there than drawn); the city, units or MTN in the middle; and along the bottom what is on the ground: a short resource name (Iron, Oil, Coal, Horses...), a feature letter (F forest, J jungle, M marsh, O oasis, fp flood plains, ice, X fallout, atl atoll, NW natural wonder) with h added for hills (Fh = forest on hills, h alone = bare hills), and an improvement (the first letters of its name: farm, mine, tradi, plant...; ancient ruins show as ruins). Bright cyan edges = rivers; dark brown lines with a dot = roads. Cities are labeled boxes in the owner's color (units inside a city are not drawn). Units are circles in the owner's color with a short name; the ring says whose: white yours, green a teammate's, red an enemy's, grey anyone else's; +N when more are stacked than shown. Hatched hexes are explored but out of sight now (no units shown); a dark hex with ? was never explored. The legend names each civilization's color and relation. The text beside the picture lists the cities and units in it with exact coordinates. Use it to see borders, fronts and where armies stand; use map for exact tile details.",
 		  "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"},\"radius\":{\"type\":\"integer\"}}}", ToolMapImage, LOG_NONE, false },
 		{ "known_cities",
 		  "Every city of other civilizations and city-states your civilization has seen, with position, the owner as you last saw it, whether you are at war with that owner, and, while the tile is in sight, population, hit points and strength.",

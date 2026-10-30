@@ -79,26 +79,6 @@ namespace McpTool
 		}
 	}
 
-	// The engine's help text carries [ICON_...] and [NEWLINE] markup.
-	std::string StripMarkup(const std::string& s)
-	{
-		std::string out;
-		bool bTag = false;
-		for(size_t i = 0; i < s.size(); ++i)
-		{
-			char ch = s[i];
-			if(ch == '[') { bTag = true; if(s.compare(i, 9, "[NEWLINE]") == 0) out += "; "; continue; }
-			if(ch == ']') { bTag = false; continue; }
-			if(bTag) continue;
-			if(isspace((unsigned char)ch)) { if(!out.empty() && out[out.size() - 1] != ' ') out += ' '; continue; }
-			out += ch;
-		}
-		size_t b = out.find_first_not_of(" ;");
-		if(b == std::string::npos) return "";
-		size_t e = out.find_last_not_of(" ;");
-		return out.substr(b, e - b + 1);
-	}
-
 	// bPurchase: the question is whether it can be bought, so production cost does not count.
 	std::string TrainRefusal(CvCity* c, UnitTypes eUnit, bool bPurchase)
 	{

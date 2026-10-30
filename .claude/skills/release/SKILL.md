@@ -25,21 +25,15 @@ On a branch named `release-<version>`:
 - set the number in `VERSION`, in `MCPServer/src/McpVersion.h` and in `ModVersion` in `MCPServer/mod/MCPServer.civ5proj`;
 - if the Bazaar line changed, change the last sentence of the civ5proj's description, and the "Requires Bazaar" line in `docs/steam-workshop-description.txt`, to match ("Requires Bazaar X.Y.Z or newer.");
 - run `python tools/release.py check` and `python -m unittest discover -s tests`;
-- commit, push, and open a pull request to main. The user reviews and merges it on GitHub; the skill never merges.
+- commit, push, and open a pull request to main. Once the user has approved its text, merge it and delete the branch, on GitHub and here: `gh pr merge --merge --delete-branch`.
 
 ## 3. Build
 
-After the user merges the pull request, switch to main and bring it up to date with GitHub (`git switch main`, then `git pull`). Then, with nothing uncommitted, run `python tools/release.py build`. It downloads the SDK of the Bazaar release in `VERSION`, builds from scratch, and writes the package and its debug symbols to `Build\release\<version>`, keeping any notes.md already there.
+After the merge, switch to main and bring it up to date with GitHub (`git switch main`, then `git pull`). Then, with nothing uncommitted, run `python tools/release.py build`. It downloads the SDK of the Bazaar release in `VERSION`, builds from scratch, and writes the package and its debug symbols to `Build\release\<version>`, keeping any notes.md already there.
 
 ## 4. Check in the game
 
-First run the scripted checks against the release's package, which plays the test save over MCP with nobody at the keyboard (`tests/ingame/README.md` says what it needs): `python tests\ingame\run.py Build\release\<version>\MCP-Server-for-Bazaar-<version>.civ5mod`. Every check must pass.
-
-Then ask the user to install the package from `Build\release\<version>`, not from the build folders, with the Bazaar release it names, as a player would. Then check that:
-
-- the Plugins screen shows "MCP Server for Bazaar <version>";
-- a model connects at http://127.0.0.1:7676/mcp, plays a turn, and the AI Log shows it;
-- a save made with the previous release still loads (not for the first release).
+Run the scripted checks against the release's package. They play the test save over MCP with nobody at the keyboard (`tests/ingame/README.md` says what they need): `python tests\ingame\run.py Build\release\<version>\MCP-Server-for-Bazaar-<version>.civ5mod`. Every check must pass. These checks are the game check: don't ask the user to install and play the release.
 
 ## 5. Notes
 

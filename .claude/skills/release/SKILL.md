@@ -9,12 +9,13 @@ description: Make a release of the MCP server plugin - choose the number, prepar
 
 ## 1. Choose the number
 
-`VERSION` holds the release number, MAJOR.MINOR.MOD, and the Bazaar release to build against.
+`VERSION` holds the release number, MAJOR.MINOR.MOD, the oldest Bazaar release the plugin works with, and the Bazaar release whose SDK it is built with.
 
 - MOD, the last number, is the game's mod version. It goes up by one every release and never resets.
 - MINOR goes up when the release adds something, such as a tool or a feature.
 - MAJOR goes up when the release breaks something, such as a tool removed or renamed or an argument changed, so prompts written for the old one stop working. MINOR then goes back to 0.
-- The Bazaar line names the oldest Bazaar release the plugin works with, and the SDK it is built against. Raise it whenever the plugin needs something newer, an API addition or a fix.
+- The bazaar line names the oldest Bazaar release the plugin works with. Raise it whenever the plugin needs something newer, an API addition or a fix.
+- The sdk line names the Bazaar release whose SDK the plugin is built with, usually the newest Bazaar release with the same first two numbers as the bazaar line (`gh release list --repo spradlin-dev-bazaar/civ5-bazaar` lists them). The script refuses an SDK older than the bazaar line or with other first two numbers.
 
 Fetch GitHub's tags first (`git fetch --tags --force`), then read `git log v<last release>..main` and propose the number to the user.
 
@@ -22,17 +23,17 @@ Fetch GitHub's tags first (`git fetch --tags --force`), then read `git log v<las
 
 On a branch named `release-<version>`:
 
-- set the number in `VERSION`, in `MCPServer/src/McpVersion.h` and in `ModVersion` in `MCPServer/mod/MCPServer.civ5proj`;
-- if the Bazaar line changed, change the last sentence of the civ5proj's description, and the "Requires Bazaar" line in `docs/steam-workshop-description.txt`, to match ("Requires Bazaar X.Y.Z or newer.");
+- set the number in `VERSION`, in `MCPServer/src/McpVersion.h`, in `ModVersion` in `MCPServer/mod/MCPServer.civ5proj`, and in the sentence that ends the civ5proj's description, which also names the sdk line: "This is MCP Server for Bazaar <version>, built with the Bazaar <sdk> SDK.";
+- if the bazaar line changed, change the "Requires Bazaar" sentence in the civ5proj's description, and the "Requires Bazaar" line in `docs/steam-workshop-description.txt`, to match ("Requires Bazaar X.Y.Z or newer.");
 - draft the release notes in `Build\release\<version>\notes.md`. They open with the Bazaar line, `Requires Bazaar <X.Y.Z> or newer.`, which `publish` requires, say what changed for players since the last release, and end with how to install it, as the last release's notes do;
 - add the same changes at the top of `docs/steam-workshop-changes.txt` in BBCode, under a `[b]<version>[/b]` line, without the install steps or the file names. `workshop` uploads that section as the Workshop change note;
 - run `python tools/release.py check` and `python -m unittest discover -s tests`;
-- show the user, word for word, the commit message, the pull request's title and description, the notes and the change note, and get them approved together;
+- put the commit message and the pull request's title and description in review files in `Build\drafts\`, open them, the notes and the change-note file in CLion for the user to edit, and get them all approved together; use the text as the user saved it, then delete the review files;
 - commit, push, and open a pull request to main. Merge it and delete the branch, on GitHub and here: `gh pr merge --merge --delete-branch`.
 
 ## 3. Build
 
-After the merge, switch to main and bring it up to date with GitHub (`git switch main`, then `git pull`). Then, with nothing uncommitted, run `python tools/release.py build`. It downloads the SDK of the Bazaar release in `VERSION`, builds from scratch, and writes the package and its debug symbols to `Build\release\<version>`, keeping any notes.md already there.
+After the merge, switch to main and bring it up to date with GitHub (`git switch main`, then `git pull`). Then, with nothing uncommitted, run `python tools/release.py build`. It downloads the SDK of the Bazaar release on `VERSION`'s sdk line, builds from scratch, and writes the package and its debug symbols to `Build\release\<version>`, keeping any notes.md already there.
 
 ## 4. Check in the game
 

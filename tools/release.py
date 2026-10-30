@@ -3,14 +3,21 @@
     python tools/release.py check
     python tools/release.py build [--sdk FOLDER]
     python tools/release.py publish --notes FILE
+    python tools/release.py workshop
 
 check: every copy of the version agrees with VERSION, and the release number follows the last release tagged here.
 build: builds the DLL and its .civ5mod from scratch against the SDK of the Bazaar release named in VERSION, downloaded
 from GitHub, or against a local SDK folder for a trial build, then checks what went into the package. Output goes to
 Build\\release.
-publish: fetches GitHub's tags, pushes the release's tag and creates a draft GitHub release with the package, its debug
+publish: fetches GitHub's tags, pushes the release's tag and publishes the GitHub release with the package, its debug
 symbols and the given notes. It refuses a build made with --sdk or from anything but a clean, pushed main. If it stops
 after pushing the tag, it says how to finish: delete any half-made draft on GitHub, then run it again.
+workshop: downloads the package published on GitHub and uploads it to the plugin's Steam Workshop item, with the
+release's section of docs\\steam-workshop-changes.txt as the change note and docs\\steam-workshop-description.txt as
+the description, then checks that Steam shows the new file. It refuses when the item already holds that file. It needs
+Steam running and signed in to the account that owns the item, and the Sid Meier's Civilization V SDK installed from
+Steam: tools\\workshop\\upload.cpp, a copy of Bazaar's uploader, makes ModBuddy's calls through ModBuddy's own
+steam_api.dll.
 
 The steps around it are in .claude/skills/release. Building needs Visual C++ 2008, so a release is made on the
 developer's machine.
@@ -27,6 +34,10 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.parse
+import urllib.request
+import winreg
 import zipfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -34,6 +45,7 @@ VERSION_FILE = os.path.join(REPO, "VERSION")
 VERSION_HEADER = os.path.join(REPO, "MCPServer", "src", "McpVersion.h")
 PROJECT = os.path.join(REPO, "MCPServer", "mod", "MCPServer.civ5proj")
 WORKSHOP_TEXT = os.path.join(REPO, "docs", "steam-workshop-description.txt")
+WORKSHOP_CHANGES = os.path.join(REPO, "docs", "steam-workshop-changes.txt")
 BUILD_CMD = os.path.join(REPO, "MCPServer", "build.cmd")
 BUILD_OUT = os.path.join(REPO, "MCPServer", "src", "out")
 PACKAGES = os.path.join(REPO, "MCPServer", "Packages")
@@ -44,10 +56,25 @@ SDK_ASSET = "*SDK*.zip"
 # libarchive, which reads the 7z format ModBuddy's packages use; Git's tar does not.
 WINDOWS_TAR = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tar.exe")
 
+WORKSHOP_ITEM = 3827230313
+GAME_APP = 8930
+SDK_APP_KEY = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Steam App 16830"
+STEAM_API = os.path.join("ModBuddy", "Extensions", "Application", "steam_api.dll")
+UPLOADER = os.path.join(REPO, "tools", "workshop", "upload.cpp")
+UPLOADER_OUT = os.path.join(REPO, "Build", "workshop")
+DETAILS_URL = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
+WEB_API_ERRORS = (OSError, ValueError, KeyError, IndexError, TypeError)
+WEB_API_TRIES = 12
+WEB_API_WAIT_SECONDS = 5
+STEAM_OK = 1
+# Steam's limit for a description or a change note is 8000 bytes, which may count C's closing zero.
+MAX_STEAM_TEXT = 7999
+
 NUMBER = "(?:0|[1-9][0-9]*)"
 TRIPLE = r"(%s\.%s\.%s)" % (NUMBER, NUMBER, NUMBER)
 FORMAT = re.compile(r"release %s\nbazaar %s\n?" % (TRIPLE, TRIPLE))
 TAG = re.compile(r"v%s" % TRIPLE)
+CHANGE_HEADING = re.compile(r"^\[b\]%s\[/b\]$" % TRIPLE, re.M)
 
 
 class ReleaseError(Exception):
@@ -60,10 +87,6 @@ def numbers(text):
 
 class Version(collections.namedtuple("Version", "release bazaar")):
     @property
-    def major(self):
-        return numbers(self.release)[0]
-
-    @property
     def mod(self):
         return numbers(self.release)[2]
 
@@ -72,8 +95,8 @@ class Version(collections.namedtuple("Version", "release bazaar")):
         return numbers(self.bazaar)[:2]
 
 
-PublishState = collections.namedtuple(
-    "PublishState", "branch clean head origin_head remote_tag github_release tags missing"
+ReleaseState = collections.namedtuple(
+    "ReleaseState", "branch clean head origin_head remote_tag github_release tags missing"
 )
 
 
@@ -280,11 +303,45 @@ def publish_problems(version, info, state, notes):
 def publish_commands(version, state, files, title, notes_file):
     tag = "v" + version.release
     push = None if state.remote_tag else ["git", "push", "origin", "%s:refs/tags/%s" % (state.head, tag)]
-    create = ["gh", "release", "create", tag] + list(files) + ["--repo", PLUGIN_REPO, "--draft", "--verify-tag"]
+    # gh keeps the release a draft until every file is uploaded, so a failed upload never publishes half a release.
+    create = ["gh", "release", "create", tag] + list(files) + ["--repo", PLUGIN_REPO, "--verify-tag"]
     create += ["--title", title, "--notes-file", notes_file]
-    if version.major == 0:
-        create.append("--prerelease")
     return push, create
+
+
+def workshop_problems(version, state):
+    problems = []
+    # The change note and the description are read from here, so they must be the ones on GitHub's main.
+    if state.branch != "main":
+        problems.append("this is not main")
+    if not state.clean:
+        problems.append("there are uncommitted changes")
+    if state.head != state.origin_head:
+        problems.append("main is not the same as GitHub's main")
+    if state.github_release != "published":
+        problems.append("v%s is not published on GitHub; publish it first" % version.release)
+    return problems
+
+
+def change_note(changes, release):
+    """The release's section of the Workshop change notes, from its [b]release[/b] line to the next release's."""
+    headings = list(CHANGE_HEADING.finditer(changes))
+    for i, heading in enumerate(headings):
+        if heading.group(1) == release:
+            end = headings[i + 1].start() if i + 1 < len(headings) else len(changes)
+            return changes[heading.start() : end].strip()
+    raise ReleaseError(
+        "docs\\steam-workshop-changes.txt has no [b]%s[/b] section; add the release's change note at its top" % release
+    )
+
+
+def steam_text_problems(texts):
+    problems = []
+    for name, text in texts:
+        size = len(text.encode("utf-8"))
+        if size > MAX_STEAM_TEXT:
+            problems.append("%s is %d bytes, more than the %d Steam allows; shorten it" % (name, size, MAX_STEAM_TEXT))
+    return problems
 
 
 def refuse(problems):
@@ -462,19 +519,13 @@ def build(sdk_folder):
     )
 
 
-def publish(notes_file):
-    if not os.path.isfile(notes_file):
-        raise ReleaseError("there is no notes file %s" % notes_file)
-    notes = read_text(notes_file)
+def current_state(version, files):
     # GitHub's tags win over local ones, which are left at an old commit when a release's tag is remade on GitHub.
     git("fetch", "--quiet", "--tags", "--force", "origin", "main")
-    version = parse_version(read_text(VERSION_FILE))
-    project = read_text(PROJECT)
     tag = "v" + version.release
     head, clean = tree_state()
-    files = release_files(version, project)
     releases = json.loads(gh("release", "list", "--repo", PLUGIN_REPO, "--json", "tagName,isDraft", "--limit", "1000"))
-    state = PublishState(
+    return ReleaseState(
         branch=git("rev-parse", "--abbrev-ref", "HEAD"),
         clean=clean,
         head=head,
@@ -484,6 +535,17 @@ def publish(notes_file):
         tags=release_tags(),
         missing=[os.path.basename(f) for f in files if not os.path.isfile(f)],
     )
+
+
+def publish(notes_file):
+    if not os.path.isfile(notes_file):
+        raise ReleaseError("there is no notes file %s" % notes_file)
+    notes = read_text(notes_file)
+    version = parse_version(read_text(VERSION_FILE))
+    project = read_text(PROJECT)
+    tag = "v" + version.release
+    files = release_files(version, project)
+    state = current_state(version, files)
     problems = disagreements(version, read_text(VERSION_HEADER), project, read_text(WORKSHOP_TEXT))
     refuse(problems + publish_problems(version, read_build_info(release_folder(version)), state, notes))
 
@@ -498,11 +560,120 @@ def publish(notes_file):
             "%s\n%s is on GitHub; if a draft release of it was made, delete the draft there, then run publish again"
             % (e, tag)
         )
-    print("Draft release %s made; publish it on GitHub." % tag)
+    print("Release %s published on GitHub." % tag)
     try:
         git("fetch", "--quiet", "origin", "+refs/tags/%s:refs/tags/%s" % (tag, tag))
     except ReleaseError:
         print("Its tag is not here yet; fetch it with git fetch --tags --force.")
+
+
+def steam_api():
+    for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, SDK_APP_KEY, 0, winreg.KEY_READ | view) as key:
+                path = os.path.join(winreg.QueryValueEx(key, "InstallLocation")[0], STEAM_API)
+        except OSError:
+            continue
+        if os.path.isfile(path):
+            return path
+    raise ReleaseError(
+        "ModBuddy's steam_api.dll was not found; install the Sid Meier's Civilization V SDK from Steam's library"
+    )
+
+
+def item_details():
+    data = urllib.parse.urlencode({"itemcount": 1, "publishedfileids[0]": WORKSHOP_ITEM}).encode()
+    with urllib.request.urlopen(DETAILS_URL, data, timeout=30) as response:
+        return json.load(response)["response"]["publishedfiledetails"][0]
+
+
+def workshop_item():
+    try:
+        found = item_details()
+    except WEB_API_ERRORS as e:
+        raise ReleaseError("Steam's Web API did not answer about item %d: %s" % (WORKSHOP_ITEM, e))
+    if found.get("result") != STEAM_OK or found.get("consumer_app_id") != GAME_APP:
+        raise ReleaseError("item %d is not a public Civilization V item on the Steam Workshop" % WORKSHOP_ITEM)
+    return found
+
+
+def build_uploader():
+    tools = os.environ.get("VS90COMNTOOLS")
+    vsvars = os.path.join(tools, "vsvars32.bat") if tools else None
+    if not vsvars or not os.path.isfile(vsvars):
+        raise ReleaseError("Visual C++ 2008 was not found")
+    os.makedirs(UPLOADER_OUT, exist_ok=True)
+    command = 'call "%s" >nul && cl /nologo /EHsc /W3 /O2 /MT "%s"' % (vsvars, UPLOADER)
+    done = subprocess.run(command, shell=True, cwd=UPLOADER_OUT, capture_output=True, text=True, errors="replace")
+    if done.returncode:
+        raise ReleaseError("upload.cpp did not build:\n" + (done.stdout + done.stderr).strip())
+    return os.path.join(UPLOADER_OUT, "upload.exe")
+
+
+def write_uploader_text(name, text):
+    path = os.path.join(UPLOADER_OUT, name)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    return path
+
+
+def wait_for_file(package, before):
+    """An answer Steam's Web API does not give counts as not yet, since the upload has already gone through."""
+    size = os.path.getsize(package)
+    for _ in range(WEB_API_TRIES):
+        try:
+            now = item_details()
+            if int(now["file_size"]) == size and now["time_updated"] > before["time_updated"]:
+                return True
+        except WEB_API_ERRORS:
+            pass
+        time.sleep(WEB_API_WAIT_SECONDS)
+    return False
+
+
+def upload(package, note, description):
+    api = steam_api()
+    before = workshop_item()
+    name = os.path.basename(package)
+    if before.get("filename") == name and str(before.get("file_size")) == str(os.path.getsize(package)):
+        raise ReleaseError("Steam Workshop item %d already holds %s" % (WORKSHOP_ITEM, name))
+    uploader = build_uploader()
+    note_file = write_uploader_text("change-note.txt", note)
+    description_file = write_uploader_text("description.txt", description)
+    print("Uploading %s to Steam Workshop item %d." % (name, WORKSHOP_ITEM), flush=True)
+    if subprocess.run(
+        [uploader, api, str(WORKSHOP_ITEM), package, note_file, description_file], cwd=UPLOADER_OUT
+    ).returncode:
+        raise ReleaseError("the uploader stopped, as its message above says")
+    if not wait_for_file(package, before):
+        raise ReleaseError(
+            "Steam took the upload, but its Web API does not show the new file on item %d yet; check the item's page"
+            % WORKSHOP_ITEM
+        )
+    print("Steam Workshop item %d now holds %s." % (WORKSHOP_ITEM, name))
+
+
+def workshop():
+    version = parse_version(read_text(VERSION_FILE))
+    project = read_text(PROJECT)
+    state = current_state(version, ())
+    description = read_text(WORKSHOP_TEXT)
+    problems = disagreements(version, read_text(VERSION_HEADER), project, description)
+    refuse(problems + workshop_problems(version, state))
+    note = change_note(read_text(WORKSHOP_CHANGES), version.release)
+    refuse(
+        steam_text_problems(
+            [
+                ("the %s section of docs\\steam-workshop-changes.txt" % version.release, note),
+                ("docs\\steam-workshop-description.txt", description),
+            ]
+        )
+    )
+    name = os.path.basename(release_files(version, project)[0])
+    # A local rebuild makes another DLL, which the symbols published with the release would not match.
+    with tempfile.TemporaryDirectory() as folder:
+        gh("release", "download", "v" + version.release, "--repo", PLUGIN_REPO, "--pattern", name, "--dir", folder)
+        upload(os.path.join(folder, name), note, description)
 
 
 def main(argv):
@@ -513,6 +684,7 @@ def main(argv):
     build_step.add_argument("--sdk", help="a local Bazaar SDK folder, for a trial build that cannot be published")
     publish_step = steps.add_parser("publish")
     publish_step.add_argument("--notes", required=True, help="the release notes, a Markdown file")
+    steps.add_parser("workshop")
     args = parser.parse_args(argv)
     try:
         if args.step == "check":
@@ -524,8 +696,10 @@ def main(argv):
             )
         elif args.step == "build":
             build(args.sdk)
-        else:
+        elif args.step == "publish":
             publish(args.notes)
+        else:
+            workshop()
     except ReleaseError as e:
         for line in str(e).splitlines():
             print("release: " + line, file=sys.stderr)

@@ -4,11 +4,15 @@ python -m unittest discover -s tests
 """
 
 import codecs
+import contextlib
+import io
 import os
 import struct
 import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
 
@@ -82,7 +86,6 @@ class VersionFileTest(unittest.TestCase):
         self.assertEqual(self.read_file(codecs.BOM_UTF8 + b"release 0.1.1\r\nbazaar 0.4.0\r\n").release, "0.1.1")
 
     def test_the_parts_of_the_numbers_are_named(self):
-        self.assertEqual(VERSION.major, 0)
         self.assertEqual(VERSION.mod, 3)
         self.assertEqual(VERSION.api, (0, 4))
 
@@ -314,7 +317,7 @@ class ReleaseFolderTest(unittest.TestCase):
 
 
 GOOD_INFO = {"commit": "abc", "clean": True, "downloaded_sdk": True}
-GOOD_STATE = release.PublishState(
+GOOD_STATE = release.ReleaseState(
     branch="main",
     clean=True,
     head="abc",
@@ -378,18 +381,285 @@ class PublishCommandTest(unittest.TestCase):
         push, _ = self.commands(remote_tag="abc")
         self.assertIsNone(push)
 
-    def test_the_release_is_a_draft_of_the_pushed_tag_in_this_repository(self):
+    def test_the_release_is_of_the_pushed_tag_in_this_repository(self):
         _, create = self.commands()
         self.assertEqual(create[:6], ["gh", "release", "create", "v0.2.3", "a.civ5mod", "a-symbols.zip"])
-        for flag in ("--draft", "--verify-tag"):
-            self.assertIn(flag, create)
+        self.assertIn("--verify-tag", create)
         self.assertEqual(create[create.index("--repo") + 1], release.PLUGIN_REPO)
         self.assertEqual(create[create.index("--notes-file") + 1], "notes.md")
         self.assertEqual(create[create.index("--title") + 1], "Title")
 
-    def test_it_is_a_pre_release_only_before_1_0(self):
-        self.assertIn("--prerelease", self.commands()[1])
-        self.assertNotIn("--prerelease", self.commands(version=release.Version("1.0.4", "0.4.0"))[1])
+    def test_it_is_published_as_a_full_release(self):
+        for version in (VERSION, release.Version("1.0.4", "0.4.0")):
+            _, create = self.commands(version=version)
+            self.assertNotIn("--draft", create)
+            self.assertNotIn("--prerelease", create)
+
+
+CHANGES = """[b]0.2.4[/b]
+Fixes one problem.
+
+Fixed:
+[list]
+[*]A fix.
+[/list]
+
+[b]0.2.3[/b]
+Shows settlers [b]good[/b] sites.
+
+[b]0.1.2[/b]
+Older.
+"""
+NOTE_0_2_4 = "[b]0.2.4[/b]\nFixes one problem.\n\nFixed:\n[list]\n[*]A fix.\n[/list]"
+
+
+class ChangeNoteTest(unittest.TestCase):
+    def test_the_newest_release_gets_only_its_own_section(self):
+        self.assertEqual(release.change_note(CHANGES, "0.2.4"), NOTE_0_2_4)
+
+    def test_an_older_release_ends_at_the_next_heading_not_at_bold_text(self):
+        self.assertEqual(release.change_note(CHANGES, "0.2.3"), "[b]0.2.3[/b]\nShows settlers [b]good[/b] sites.")
+
+    def test_the_last_section_runs_to_the_end(self):
+        self.assertEqual(release.change_note(CHANGES, "0.1.2"), "[b]0.1.2[/b]\nOlder.")
+
+    def test_a_release_without_a_section_stops(self):
+        with self.assertRaisesRegex(release.ReleaseError, r"no \[b\]0\.2\.5\[/b\] section"):
+            release.change_note(CHANGES, "0.2.5")
+
+
+class SteamTextTest(unittest.TestCase):
+    def test_a_text_at_steam_s_limit_fits(self):
+        self.assertEqual(release.steam_text_problems([("note", "x" * 7999)]), [])
+
+    def test_the_limit_counts_bytes_not_characters(self):
+        (problem,) = release.steam_text_problems([("note", "x"), ("description", "é" * 4000)])
+        self.assertIn("description is 8000 bytes, more than the 7999 Steam allows", problem)
+
+
+PUBLISHED = GOOD_STATE._replace(github_release="published")
+
+
+class WorkshopProblemsTest(unittest.TestCase):
+    def problems(self, **state):
+        return release.workshop_problems(VERSION, PUBLISHED._replace(**state))
+
+    def assert_one_problem_naming(self, words, **kwargs):
+        problems = self.problems(**kwargs)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(words, problems[0])
+
+    def test_a_published_release_on_github_s_main_passes(self):
+        self.assertEqual(self.problems(), [])
+
+    def test_main_may_have_moved_on_since_the_release(self):
+        self.assertEqual(self.problems(head="def", origin_head="def"), [])
+
+    def test_each_refusal_is_named(self):
+        self.assert_one_problem_naming("not main", branch="release-0.2.3")
+        self.assert_one_problem_naming("uncommitted", clean=False)
+        self.assert_one_problem_naming("GitHub's main", origin_head="def")
+
+    def test_a_release_not_published_stops(self):
+        for github_release in (None, "draft"):
+            self.assert_one_problem_naming("v0.2.3 is not published", github_release=github_release)
+
+
+class UploadTest(unittest.TestCase):
+    BEFORE = {"result": 1, "consumer_app_id": release.GAME_APP, "file_size": "10", "time_updated": 100}
+    AFTER = {"result": 1, "consumer_app_id": release.GAME_APP, "file_size": "3", "time_updated": 200}
+
+    def upload(self, answers=(BEFORE, AFTER), uploader_code=0):
+        """What upload stops with, or None. Steam's Web API gives the answers in turn, then the last one again, and
+        raises an answer that is an exception. self.builds counts the uploader's builds, self.uploads holds its
+        command lines and self.texts what its change note and description files held."""
+        answers = list(answers)
+        self.checks = 0
+        self.builds = 0
+        self.uploads = []
+        self.texts = []
+
+        def details():
+            self.checks += 1
+            answer = answers.pop(0) if len(answers) > 1 else answers[0]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        def build():
+            self.builds += 1
+            return "upload.exe"
+
+        def run(command, **kwargs):
+            self.uploads.append(command)
+            for path in command[4:]:
+                with open(path, encoding="utf-8") as f:
+                    self.texts.append(f.read())
+            return types.SimpleNamespace(returncode=uploader_code)
+
+        with tempfile.TemporaryDirectory() as folder:
+            package = os.path.join(folder, "MCP-Server-for-Bazaar-0.2.3.civ5mod")
+            with open(package, "wb") as f:
+                f.write(b"abc")
+            with (
+                mock.patch.object(release, "UPLOADER_OUT", folder),
+                mock.patch.object(release, "steam_api", return_value="steam_api.dll"),
+                mock.patch.object(release, "item_details", details),
+                mock.patch.object(release, "build_uploader", build),
+                mock.patch.object(release.subprocess, "run", run),
+                mock.patch.object(release.time, "sleep"),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                try:
+                    release.upload(package, "The note.", "The description.")
+                    return None
+                except release.ReleaseError as e:
+                    return str(e)
+
+    def test_the_uploader_gets_the_item_the_package_the_note_and_the_description(self):
+        self.assertIsNone(self.upload())
+        (command,) = self.uploads
+        self.assertEqual(command[:3], ["upload.exe", "steam_api.dll", "3827230313"])
+        self.assertTrue(command[3].endswith("MCP-Server-for-Bazaar-0.2.3.civ5mod"))
+        self.assertEqual(self.texts, ["The note.", "The description."])
+
+    def test_an_item_that_is_hidden_or_gone_stops_before_building(self):
+        self.assertIn("is not a public Civilization V item", self.upload(answers=(dict(self.BEFORE, result=9),)))
+        self.assertEqual(self.builds, 0)
+
+    def test_an_item_already_holding_the_file_stops_before_building(self):
+        holding = dict(self.BEFORE, filename="MCP-Server-for-Bazaar-0.2.3.civ5mod", file_size="3")
+        self.assertIn("already holds MCP-Server-for-Bazaar-0.2.3.civ5mod", self.upload(answers=(holding,)))
+        self.assertEqual(self.builds, 0)
+
+    def test_an_item_holding_another_file_of_that_name_is_updated(self):
+        same_name = dict(self.BEFORE, filename="MCP-Server-for-Bazaar-0.2.3.civ5mod")
+        self.assertIsNone(self.upload(answers=(same_name, self.AFTER)))
+        self.assertEqual(self.builds, 1)
+
+    def test_an_item_of_another_game_stops_before_building(self):
+        message = self.upload(answers=(dict(self.BEFORE, consumer_app_id=289070),))
+        self.assertIn("is not a public Civilization V item", message)
+        self.assertEqual(self.builds, 0)
+
+    def test_no_answer_from_steam_before_the_upload_stops(self):
+        message = self.upload(answers=(OSError("timed out"),))
+        self.assertIn("did not answer about item 3827230313: timed out", message)
+        self.assertEqual(self.builds, 0)
+
+    def test_a_failed_upload_stops(self):
+        self.assertIn("the uploader stopped", self.upload(uploader_code=1))
+
+    def test_a_new_file_that_shows_late_is_waited_for(self):
+        self.assertIsNone(self.upload(answers=(self.BEFORE, self.BEFORE, self.BEFORE, self.AFTER)))
+        self.assertEqual(self.checks, 4)
+
+    def test_no_answer_after_the_upload_counts_as_not_yet(self):
+        self.assertIsNone(self.upload(answers=(self.BEFORE, OSError("timed out"), ValueError("not JSON"), self.AFTER)))
+
+    def test_an_item_still_showing_the_old_file_stops(self):
+        self.assertIn("does not show the new file", self.upload(answers=(self.BEFORE,)))
+
+    def test_an_item_updated_with_a_file_of_another_size_stops(self):
+        message = self.upload(answers=(self.BEFORE, dict(self.BEFORE, time_updated=200)))
+        self.assertIn("does not show the new file", message)
+
+
+class BuildUploaderTest(unittest.TestCase):
+    def test_without_visual_c_plus_plus_it_stops(self):
+        with mock.patch.dict(os.environ, {"VS90COMNTOOLS": ""}):
+            with self.assertRaisesRegex(release.ReleaseError, "Visual C\\+\\+ 2008 was not found"):
+                release.build_uploader()
+
+    def test_a_failed_build_stops_with_the_compiler_s_errors(self):
+        with tempfile.TemporaryDirectory() as folder:
+            open(os.path.join(folder, "vsvars32.bat"), "w").close()
+            failed = types.SimpleNamespace(returncode=2, stdout="upload.cpp(1) : error C2143\n", stderr="")
+            with (
+                mock.patch.dict(os.environ, {"VS90COMNTOOLS": folder}),
+                mock.patch.object(release, "UPLOADER_OUT", os.path.join(folder, "out")),
+                mock.patch.object(release.subprocess, "run", return_value=failed),
+            ):
+                with self.assertRaisesRegex(release.ReleaseError, "did not build:\nupload.cpp\\(1\\) : error C2143"):
+                    release.build_uploader()
+
+    def test_a_failure_before_the_compiler_stops_with_cmd_s_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            open(os.path.join(folder, "vsvars32.bat"), "w").close()
+            failed = types.SimpleNamespace(returncode=1, stdout="", stderr="'cl' is not recognized\n")
+            with (
+                mock.patch.dict(os.environ, {"VS90COMNTOOLS": folder}),
+                mock.patch.object(release, "UPLOADER_OUT", os.path.join(folder, "out")),
+                mock.patch.object(release.subprocess, "run", return_value=failed),
+            ):
+                with self.assertRaisesRegex(release.ReleaseError, "did not build:\n'cl' is not recognized"):
+                    release.build_uploader()
+
+
+class WorkshopTest(unittest.TestCase):
+    def workshop(self, state=PUBLISHED, changes=CHANGES, description=WORKSHOP, download_fails=False):
+        """What workshop stops with, or None. self.downloads holds gh's arguments and self.sent what workshop handed to
+        upload, with the package's bytes in place of its path, which is gone once workshop returns."""
+        self.downloads = []
+        self.sent = []
+        files = {
+            release.VERSION_FILE: "release 0.2.4\nbazaar 0.4.0\n",
+            release.VERSION_HEADER: HEADER.replace("0.2.3", "0.2.4"),
+            release.PROJECT: PROJECT.replace("<ModVersion>3", "<ModVersion>4"),
+            release.WORKSHOP_TEXT: description,
+            release.WORKSHOP_CHANGES: changes,
+        }
+
+        def gh(*args):
+            self.downloads.append(args)
+            if download_fails:
+                raise release.ReleaseError("gh release download failed: no assets match the file pattern")
+            folder = args[args.index("--dir") + 1]
+            with open(os.path.join(folder, args[args.index("--pattern") + 1]), "wb") as f:
+                f.write(b"published")
+
+        def upload(package, note, description):
+            with open(package, "rb") as f:
+                self.sent.append((os.path.basename(package), f.read(), note, description))
+
+        with (
+            mock.patch.object(release, "read_text", files.__getitem__),
+            mock.patch.object(release, "current_state", return_value=state),
+            mock.patch.object(release, "gh", gh),
+            mock.patch.object(release, "upload", upload),
+        ):
+            try:
+                release.workshop()
+                return None
+            except release.ReleaseError as e:
+                return str(e)
+
+    def test_a_published_release_sends_github_s_package_its_note_and_the_description(self):
+        self.assertIsNone(self.workshop())
+        (download,) = self.downloads
+        self.assertEqual(download[:3], ("release", "download", "v0.2.4"))
+        self.assertEqual(download[download.index("--repo") + 1], release.PLUGIN_REPO)
+        self.assertEqual(self.sent, [("MCP-Server-for-Bazaar-0.2.4.civ5mod", b"published", NOTE_0_2_4, WORKSHOP)])
+
+    def test_a_failed_download_sends_nothing(self):
+        self.assertIn("no assets match", self.workshop(download_fails=True))
+        self.assertEqual(self.sent, [])
+
+    def test_a_refused_state_sends_nothing(self):
+        self.assertIn("not published", self.workshop(state=PUBLISHED._replace(github_release="draft")))
+        self.assertEqual(self.sent, [])
+
+    def test_a_release_without_a_change_note_sends_nothing(self):
+        self.assertIn("no [b]0.2.4[/b] section", self.workshop(changes=CHANGES.replace("0.2.4", "0.2.5")))
+        self.assertEqual(self.sent, [])
+
+    def test_a_description_without_the_bazaar_line_sends_nothing(self):
+        self.assertIn("steam-workshop-description.txt does not say", self.workshop(description="[h1]MCP[/h1]\n"))
+        self.assertEqual(self.sent, [])
+
+    def test_a_description_over_steam_s_limit_sends_nothing(self):
+        self.assertIn("8000 bytes", self.workshop(description=WORKSHOP + "x" * (8000 - len(WORKSHOP))))
+        self.assertEqual(self.sent, [])
 
 
 if __name__ == "__main__":

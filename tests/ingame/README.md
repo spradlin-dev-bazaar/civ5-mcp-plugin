@@ -47,7 +47,7 @@ c.equal("spies names the spy in Gao", [s["city"] for s in spies["spies"]], ["Gao
 c.refuses("congress before the World Congress is founded", "congress", "has not been founded")
 ```
 
-Put a new check at the end of the step it belongs to, or in a new step at the end of `SCENARIO`, so that it does not change what the game does before the checks already there. Ids of cities and units come from the save. A new tool in the plugin also goes in `TOOLS`, which the first step checks against the plugin's list.
+A check that only reads the game can go in any step. A call that changes the game goes in a new step at the end of `SCENARIO`, so that it does not change what the game does before the checks already there. Ids of cities and units come from the save. A new tool in the plugin also goes in `TOOLS`, which the first step checks against the plugin's list.
 
 A refused call, an answer a step cannot use, or a call `c.refuses` expected to be refused but that went through, ends that step. When the step only looks at the game (those in `READ_ONLY`), the steps after it still run; otherwise the scenario stops there and says which steps it did not run.
 

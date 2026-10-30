@@ -124,7 +124,7 @@ public:
 	// game's dialog is open for the player on screen: it is a model's only when a session
 	// plays that civilization, and is then closed once the model has read it. Other popups
 	// name the civilization they are for: a seat, or the one on screen while a model plays it.
-	// UI thread (Lua) or game thread: it only queues, and must not read the game.
+	// UI thread (Lua) or game thread: it only queues, and must not read the game itself.
 	void NotePopup(int player, int iType, int iData1, int iData2, int iData3, bool bOption1, const std::string& text, bool bOnScreen);
 
 	// UI thread (Lua). Dialog names whose messages were acknowledged since the last

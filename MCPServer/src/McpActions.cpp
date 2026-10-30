@@ -271,7 +271,7 @@ MCP_TOOL(ToolAttack)
 		if(cityAfter && cityAfter->getOwner() == me->GetID())
 		{
 			o["city_captured"] = J(true);
-			if(CaptureUndecided(cityAfter)) o["note"] = J("decide its fate with city_task: " + CaptureChoices(me, cityAfter));
+			if(CaptureUndecided(cityAfter)) o["note"] = J(CaptureDecision(me, cityAfter));
 		}
 		else if(cityAfter) { targetHpAfter = cityAfter->GetMaxHitPoints() - cityAfter->getDamage(); o["target_hp"] = J(targetHpAfter); }
 	}

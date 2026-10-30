@@ -769,7 +769,7 @@ namespace McpTool
 		return McpFormat("captured city: decide the fate of %s (id %d) with city_task: ", c->getName().c_str(), c->GetID()) + CaptureChoices(me, c);
 	}
 
-	std::string UndecidedCapture(CvPlayer* me)
+	std::string PendingCaptureDecision(CvPlayer* me)
 	{
 		int iLoop = 0;
 		for(CvCity* c = me->firstCity(&iLoop); c; c = me->nextCity(&iLoop))
@@ -779,7 +779,7 @@ namespace McpTool
 
 	std::string EndTurnBlockingText(CvPlayer* me)
 	{
-		std::string capture = UndecidedCapture(me);
+		std::string capture = PendingCaptureDecision(me);
 		return capture.empty() ? BlockingName(EndTurnBlocking(me)) : capture;
 	}
 

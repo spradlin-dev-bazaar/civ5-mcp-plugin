@@ -138,7 +138,7 @@ namespace McpTool
 	std::string CaptureChoices(CvPlayer* me, CvCity* c);
 	std::string CaptureDecision(CvPlayer* me, CvCity* c);
 	// The game holds the turn for its own question about this only for the player on screen, who may never see it.
-	std::string UndecidedCapture(CvPlayer* me);
+	std::string PendingCaptureDecision(CvPlayer* me);
 	std::string EndTurnBlockingText(CvPlayer* me);
 	JVal UnitJson(CvUnit* u);
 	JVal CityJson(CvCity* c);

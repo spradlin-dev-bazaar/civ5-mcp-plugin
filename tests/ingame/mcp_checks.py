@@ -113,7 +113,7 @@ COPENHAGEN, AARHUS, KAUPANG = 8192, 16385, 24578
 GREAT_WRITER, WORKER, WORKER_2, CARAVAN, GREAT_PROPHET = 344074, 90119, 98312, 286732, 303107
 BERSERKER_GAO, BERSERKER_NORTH, BERSERKER_EAST, BERSERKER_WEST = 237568, 139269, 262155, 229377
 KNIGHT_EAST, SWORDSMAN, TREBUCHET_AARHUS, TREBUCHET_NEW = 204806, 106505, 294914, 352266
-MUSKETMAN, MISSIONARY, CAPTURED_WORKER, TREBUCHET_FARM = 401426, 385039, 409600, 327684
+MUSKETMAN, MISSIONARY, CAPTURED_WORKER, TREBUCHET_FARM, KNIGHT_KAUPANG = 401426, 385039, 409600, 327684, 335885
 DENMARK, INDIA, RUSSIA, POLAND = 2, 3, 4, 5
 DELHI, VIJAYANAGARA, ROSTOV = 8192, 24578, 32771
 ROSTOV_TILE, MOSCOW_TILE, MUSKETMAN_TILE = dict(x=54, y=37), dict(x=48, y=39), dict(x=37, y=27)
@@ -121,19 +121,19 @@ IDLE_UNITS = {
     BERSERKER_GAO: ("Berserker", "fortify"),
     TREBUCHET_FARM: ("Trebuchet", "sleep"),
     KNIGHT_EAST: ("Knight", "sleep"),
-    335885: ("Knight", "sleep"),
+    KNIGHT_KAUPANG: ("Knight", "sleep"),
 }
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 # The question window closes only through its own HideWindow, as its buttons do: closed from outside, it shows no
 # question for the rest of the game.
 GENERIC_POPUP = "GenericPopup"
-GREAT_WORK_POPUP = (
-    "Events.SerialEventGameMessagePopup({Type = ButtonPopupTypes.BUTTONPOPUP_GREAT_WORK_COMPLETED_ACTIVE_PLAYER,"
-    " Data1 = 0, Data2 = %d%s})"
-)
-GREAT_WORK_LOOKED_AT = GREAT_WORK_POPUP % (INDIA, ", Priority = PopupPriority.Current")
-GREAT_WORK_RECEIVED = GREAT_WORK_POPUP % (INDIA, "")
+POPUP = "Events.SerialEventGameMessagePopup({Type = ButtonPopupTypes.%s, %s})"
+GREAT_WORK = "BUTTONPOPUP_GREAT_WORK_COMPLETED_ACTIVE_PLAYER"
+GREAT_WORK_LOOKED_AT = POPUP % (GREAT_WORK, "Data1 = 0, Data2 = %d, Priority = PopupPriority.Current" % INDIA)
+GREAT_WORK_RECEIVED = POPUP % (GREAT_WORK, "Data1 = 0, Data2 = %d" % INDIA)
+CONGRESS_FOUNDED = POPUP % ("BUTTONPOPUP_LEAGUE_SPLASH", "Data1 = 0, Data2 = %d, Option1 = true" % RUSSIA)
+CONGRESS_SPECIAL_SESSION = POPUP % ("BUTTONPOPUP_LEAGUE_SPLASH", "Data1 = 0, Data2 = %d, Option1 = false" % RUSSIA)
 QUESTION_OPEN = "print(tostring(not ContextPtr:IsHidden()))"
 KEEP_CAPTURED_WORKER = "Network.SendReturnCivilian(false, %d, %d) HideWindow()" % (RUSSIA, CAPTURED_WORKER)
 CLOSE_QUESTION = "HideWindow()"
@@ -282,6 +282,128 @@ def work_titles(works):
     }
 
 
+def wait_for_turn(c, turn, tries=12):
+    """Waits until it is the session's turn; returns the status, which may be an earlier turn that came back. turn is
+    only for the message if it does not come."""
+    for _ in range(tries):
+        status = c.mcp.call("wait_for_my_turn", timeout_seconds=50)
+        if status.get("is_my_turn"):
+            return status
+    raise RuntimeError("turn %d did not come within %d waits; the last status: %s" % (turn, tries, status))
+
+
+def wait_for_seat_turn(c, turn, tries=12):
+    """Waits for a seat's turn while nobody plays the screen: a unit that finishes a queued move with moves to spare
+    reopens the idle human's turn, so it is skipped again."""
+    refused = None
+    for _ in range(tries):
+        status = c.mcp.call("wait_for_my_turn", timeout_seconds=20)
+        if status.get("is_my_turn"):
+            return status
+        try:
+            c.mcp.call("skip_human_turn")
+        except Refused as e:
+            refused = e
+    raise RuntimeError(
+        "the seat's turn %d did not come within %d waits; skip_human_turn last refused with %s; the last status: %s"
+        % (turn, tries, refused, status)
+    )
+
+
+def end_turn_and_wait(c, turn, summary=None, tries=5):
+    """Ends the turn and waits for the next, as a model does: when the turn comes back early, because a unit finished a
+    queued move with moves to spare, the idle units skip and the turn ends again. Returns the next turn's status and
+    the units that brought the turn back, in order."""
+    reopened_by = []
+    for _ in range(tries):
+        ended = c.mcp.call("end_turn", summary=summary or "mcp_checks: turn %d." % turn)
+        c.equal("end_turn ends turn %d" % turn, ended.get("ended_turn"), turn)
+        status = wait_for_turn(c, turn + 1)
+        if status["turn"] != turn:
+            return status, reopened_by
+        c.mcp.call("acknowledge_messages")
+        for unit in c.mcp.call("units")["units"]:
+            if unit["needs_orders"]:
+                reopened_by.append("%s %d at (%d,%d)" % (unit["name"], unit["id"], unit["x"], unit["y"]))
+                c.mcp.call("unit_action", unit_id=unit["id"], action="skip")
+    raise RuntimeError("turn %d kept coming back: %s" % (turn, reopened_by))
+
+
+def answer_requests(c, briefing, expected, choice=None):
+    """Answers every request from another leader with choice, or else its first choice, as the checks expect them to
+    arrive."""
+    requests = briefing["diplomacy_requests"]
+    c.equal("the requests from other leaders", [(r["from"], r["kind"]) for r in requests], expected)
+    for r in requests:
+        answer = choice or r["choices"].split(", ")[0]
+        c.answers(
+            "respond_to_request: %s to %s's %s" % (answer, r["from"], r["kind"]),
+            "respond_to_request",
+            id=r["id"],
+            choice=answer,
+        )
+
+
+def notices_of_turn(briefing, turn):
+    return [(e["summary"], e["text"]) for e in briefing["events"] if e["turn"] == turn]
+
+
+def wait_for_unread_message(c, text, seconds=20):
+    """The unread game message containing text, or None, and the unread messages: the game reports it a few frames
+    after the event."""
+    deadline = time.time() + seconds
+    while True:
+        unread = [m["text"] for m in c.mcp.call("briefing")["game_messages"] if m.get("unread")]
+        said = next((message for message in unread if text in message), None)
+        if said or time.time() >= deadline:
+            return said, unread
+        time.sleep(1)
+
+
+def turn_begins(c, turn):
+    """The briefing that opens a turn, checked to be for that turn."""
+    briefing = c.answers("briefing on turn %d" % turn, "briefing")
+    c.equal("the briefing is for turn %d" % turn, briefing["turn"], turn)
+    return briefing
+
+
+def hear_and_acknowledge(c, what, text):
+    """Waits for the unread game message containing text, then acknowledges every unread message."""
+    said, unread = wait_for_unread_message(c, text)
+    c.check(what, said, "the unread game messages: %s" % ("; ".join(unread) or "none"))
+    c.answers("acknowledge: " + what, "acknowledge_messages")
+
+
+def game_lua(code, state=game.IN_GAME):
+    port = tuner.Tuner()
+    port.connect(10)
+    try:
+        return port.run(state, code)
+    finally:
+        port.close()
+
+
+def second_model(c):
+    other = Checks(Mcp())
+    other.results = c.results
+    other.mcp.connect()
+    other.mcp.notify("notifications/initialized")
+    named = other.answers("set_identity for a second model", "set_identity", provider="Test", model="Seat", version="2")
+    other.equal("the second model is named", named.get("playing_as"), "Test Seat 2")
+    return other
+
+
+def unit_of_type(c, unit_type, needs_orders=False):
+    for unit in c.mcp.call("units")["units"]:
+        if unit["type"] == unit_type and (unit["needs_orders"] or not needs_orders):
+            return unit
+    raise RuntimeError("no unit of type %s%s" % (unit_type, " needs orders" if needs_orders else ""))
+
+
+def event_summaries(briefing):
+    return [e["summary"] for e in briefing["events"]]
+
+
 def connecting(c):
     init = c.mcp.connect()
     c.equal("the server names itself", init["serverInfo"]["name"], "civ5-mcp-plugin")
@@ -405,11 +527,12 @@ def research_and_policies(c):
     c.equal("archaeology: no dig waiting", c.answers("archaeology", "archaeology")["digs_waiting"], 0)
     lookup = c.answers("lookup TECH_GUNPOWDER", "lookup", type="TECH_GUNPOWDER")
     c.check("lookup names the technology", "Gunpowder" in json.dumps(lookup), json.dumps(lookup)[:200])
-    masonry = json.dumps(c.answers("lookup TECH_MASONRY", "lookup", type="TECH_MASONRY"))
+    unlocks = c.answers("lookup TECH_MASONRY", "lookup", type="TECH_MASONRY")["tech"]["unlocks"]
+    builds = [u for u in unlocks if u.startswith("worker build: ")]
     c.check(
-        "lookup names a worker build in words, not a text key",
-        "worker build: " in masonry and "(BUILD_QUARRY)" in masonry and "TXT_KEY" not in masonry,
-        masonry[:300],
+        "lookup names a worker build in words, without a text key or markup",
+        any("(BUILD_QUARRY)" in b for b in builds) and not any("TXT_KEY" in b or "[" in b for b in builds),
+        unlocks,
     )
     parts = c.answers("map_image", "map_image")
     images = [p for p in parts if isinstance(p, dict) and "image" in p]
@@ -539,68 +662,6 @@ def turn_150_actions(c):
     )
 
 
-def wait_for_turn(c, turn, tries=12):
-    """Waits until it is the session's turn; returns the status, which may be an earlier turn that came back. turn is
-    only for the message if it does not come."""
-    for _ in range(tries):
-        status = c.mcp.call("wait_for_my_turn", timeout_seconds=50)
-        if status.get("is_my_turn"):
-            return status
-    raise RuntimeError("turn %d did not come within %d waits; the last status: %s" % (turn, tries, status))
-
-
-def wait_for_seat_turn(c, turn, tries=12):
-    """Waits for a seat's turn while nobody plays the screen: a unit that finishes a queued move with moves to spare
-    reopens the idle human's turn, so it is skipped again."""
-    refused = None
-    for _ in range(tries):
-        status = c.mcp.call("wait_for_my_turn", timeout_seconds=20)
-        if status.get("is_my_turn"):
-            return status
-        try:
-            c.mcp.call("skip_human_turn")
-        except Refused as e:
-            refused = e
-    raise RuntimeError(
-        "the seat's turn %d did not come within %d waits; skip_human_turn last refused with %s; the last status: %s"
-        % (turn, tries, refused, status)
-    )
-
-
-def end_turn_and_wait(c, turn, summary=None, tries=5):
-    """Ends the turn and waits for the next, as a model does: when the turn comes back early, because a unit finished a
-    queued move with moves to spare, the idle units skip and the turn ends again. Returns the next turn's status and
-    the units that brought the turn back, in order."""
-    reopened_by = []
-    for _ in range(tries):
-        ended = c.mcp.call("end_turn", summary=summary or "mcp_checks: turn %d." % turn)
-        c.equal("end_turn ends turn %d" % turn, ended.get("ended_turn"), turn)
-        status = wait_for_turn(c, turn + 1)
-        if status["turn"] != turn:
-            return status, reopened_by
-        c.mcp.call("acknowledge_messages")
-        for unit in c.mcp.call("units")["units"]:
-            if unit["needs_orders"]:
-                reopened_by.append("%s %d at (%d,%d)" % (unit["name"], unit["id"], unit["x"], unit["y"]))
-                c.mcp.call("unit_action", unit_id=unit["id"], action="skip")
-    raise RuntimeError("turn %d kept coming back: %s" % (turn, reopened_by))
-
-
-def answer_requests(c, briefing, expected, choice=None):
-    """Answers every request from another leader with choice, or else its first choice, as the checks expect them to
-    arrive."""
-    requests = briefing["diplomacy_requests"]
-    c.equal("the requests from other leaders", [(r["from"], r["kind"]) for r in requests], expected)
-    for r in requests:
-        answer = choice or r["choices"].split(", ")[0]
-        c.answers(
-            "respond_to_request: %s to %s's %s" % (answer, r["from"], r["kind"]),
-            "respond_to_request",
-            id=r["id"],
-            choice=answer,
-        )
-
-
 def turn_151(c):
     briefing = c.answers("briefing on turn 151", "briefing")
     c.equal("the briefing is for turn 151", briefing["turn"], 151)
@@ -623,22 +684,6 @@ def turn_151(c):
     hear_and_acknowledge(c, "Russia's leader screen reaches the model as a game message", "Russia's leader says")
 
 
-def notices_of_turn(briefing, turn):
-    return [(e["summary"], e["text"]) for e in briefing["events"] if e["turn"] == turn]
-
-
-def wait_for_unread_message(c, text, seconds=20):
-    """The unread game message containing text, or None, and the unread messages: the game reports it a few frames
-    after the event."""
-    deadline = time.time() + seconds
-    while True:
-        unread = [m["text"] for m in c.mcp.call("briefing")["game_messages"] if m.get("unread")]
-        said = next((message for message in unread if text in message), None)
-        if said or time.time() >= deadline:
-            return said, unread
-        time.sleep(1)
-
-
 def seats(c):
     taken = c.answers("take_seat India", "take_seat", civ="India")
     c.equal("the session now plays India", taken["playing"], "India")
@@ -656,50 +701,6 @@ def seats(c):
     c.answers("testing_mode off", "testing_mode", enabled=False)
     status = wait_for_turn(c, 152)
     c.equal("Denmark's turn 152 comes", (status["civilization"], status["turn"]), ("Denmark", 152))
-
-
-def turn_begins(c, turn):
-    """The briefing that opens a turn, checked to be for that turn."""
-    briefing = c.answers("briefing on turn %d" % turn, "briefing")
-    c.equal("the briefing is for turn %d" % turn, briefing["turn"], turn)
-    return briefing
-
-
-def hear_and_acknowledge(c, what, text):
-    """Waits for the unread game message containing text, then acknowledges every unread message."""
-    said, unread = wait_for_unread_message(c, text)
-    c.check(what, said, "the unread game messages: %s" % ("; ".join(unread) or "none"))
-    c.answers("acknowledge: " + what, "acknowledge_messages")
-
-
-def game_lua(code, state=game.IN_GAME):
-    port = tuner.Tuner()
-    port.connect(10)
-    try:
-        return port.run(state, code)
-    finally:
-        port.close()
-
-
-def second_model(c):
-    other = Checks(Mcp())
-    other.results = c.results
-    other.mcp.connect()
-    other.mcp.notify("notifications/initialized")
-    named = other.answers("set_identity for a second model", "set_identity", provider="Test", model="Seat", version="2")
-    other.equal("the second model is named", named.get("playing_as"), "Test Seat 2")
-    return other
-
-
-def unit_of_type(c, unit_type, needs_orders=False):
-    for unit in c.mcp.call("units")["units"]:
-        if unit["type"] == unit_type and (unit["needs_orders"] or not needs_orders):
-            return unit
-    raise RuntimeError("no unit of type %s%s" % (unit_type, " needs orders" if needs_orders else ""))
-
-
-def event_summaries(briefing):
-    return [e["summary"] for e in briefing["events"]]
 
 
 def turn_152(c):
@@ -1003,7 +1004,7 @@ def turn_159(c):
 
 def turn_160(c):
     turn_begins(c, 160)
-    hear_and_acknowledge(c, "the Who's Winning screen reaches the model and closes", "Who's Winning")
+    hear_and_acknowledge(c, "the Who's Winning screen reaches the model", "Who's Winning")
     hit = c.answers("the swordsman takes the camp", "attack", unit_id=SWORDSMAN, x=51, y=35)
     c.equal("the camp's pikeman is destroyed", (hit.get("target_destroyed"), hit["your_hp"]), (True, 83))
     said, unread = wait_for_unread_message(c, "Captured a Worker (unit id %d)" % CAPTURED_WORKER)
@@ -1093,7 +1094,7 @@ def turns_162_to_164(c):
         options["destinations"],
     )
     spent = c.answers("the missionary's last spread", "unit_action", unit_id=MISSIONARY, action="spread_religion")
-    c.equal("unit_action says the missionary was used up", spent.get("unit_used_up"), "the Missionary was used up")
+    c.equal("unit_action says the missionary is gone", spent.get("unit_gone"), "the Missionary is gone")
     c.answers("set_production Walls in Kaupang", "set_production", city_id=KAUPANG, item="BUILDING_WALLS")
     route = c.answers(
         "establish_trade_route to Zurich",
@@ -1176,7 +1177,7 @@ def turns_165_to_168(c):
     answer_requests(c, briefing, [("Songhai", "statement")], "acknowledge")
 
 
-def turn_168_great_works_clicked_and_received(c):
+def turn_168_pop_ups_raised_through_lua(c):
     game_lua(GREAT_WORK_LOOKED_AT)
     said, _ = wait_for_unread_message(c, "great work", seconds=5)
     c.equal("a Great Work the player clicks to look at sends no game message", said, None)
@@ -1191,6 +1192,18 @@ def turn_168_great_works_clicked_and_received(c):
         ["Received the great work A True Story by Lucian of Samosata (Great Writer), now in Delhi"],
     )
     c.answers("acknowledge the Great Work", "acknowledge_messages")
+    game_lua(CONGRESS_FOUNDED)
+    hear_and_acknowledge(
+        c,
+        "the World Congress's founding reaches the model",
+        "The World Congress was founded, hosted by Russia (congress shows when it meets and what is proposed)",
+    )
+    game_lua(CONGRESS_SPECIAL_SESSION)
+    hear_and_acknowledge(
+        c,
+        "a special session of the World Congress reaches the model",
+        "The World Congress has called a special session, hosted by Russia (congress shows what it votes on)",
+    )
 
 
 def turn_168_war_on_russia(c):
@@ -1339,6 +1352,9 @@ def turn_171(c):
         "this unit has no moves left this turn; give the order next turn",
     )
     c.refuses(
+        "move_unit with no moves left", "move_unit", "no moves left this turn", unit_id=BERSERKER_EAST, x=53, y=35
+    )
+    c.refuses(
         "a melee attack from two tiles away",
         "attack",
         "need the unit adjacent",
@@ -1384,7 +1400,7 @@ def turn_171(c):
     end_turn_and_wait(c, 171)
 
 
-def turn_172(c):
+def turn_172_rostov_captured(c):
     briefing = turn_begins(c, 172)
     answer_requests(c, briefing, [("Spain", "statement")], "acknowledge")
     c.equal(
@@ -1395,21 +1411,28 @@ def turn_172(c):
     said, _ = wait_for_unread_message(c, "World Congress", seconds=5)
     c.equal("the World Congress's founding, held back by the question, never arrives", said, None)
     game_lua(ROSTOV_AT_ONE_HP)
+    decide = "captured city: decide the fate of Rostov (id %d) with city_task: annex, puppet or raze" % ROSTOV
     hit = c.answers("the knight attacks Rostov at 1 hit point", "attack", unit_id=KNIGHT_EAST, **ROSTOV_TILE)
     c.equal(
         "the knight takes Rostov, and the attack offers what the game offers, without liberating it to Russia",
         (hit.get("city_captured"), hit.get("note")),
-        (True, "decide its fate with city_task: annex, puppet or raze"),
+        (True, decide),
     )
-    decide = "captured city: decide the fate of Rostov (id %d) with city_task: annex, puppet or raze" % ROSTOV
-    pending = c.answers("briefing after the capture", "briefing")["decisions_pending"]
+    briefing = c.answers("briefing after the capture", "briefing")
     c.check(
         "the briefing asks what becomes of Rostov, and not what it builds",
-        decide in pending and not any(p.startswith("production: Rostov") for p in pending),
-        pending,
+        decide in briefing["decisions_pending"]
+        and not any(p.startswith("production: Rostov") for p in briefing["decisions_pending"]),
+        briefing["decisions_pending"],
     )
     c.equal(
-        "status names Rostov's fate as what blocks the turn", c.answers("status", "status")["end_turn_blocking"], decide
+        "status, overview and the briefing name Rostov's fate as what blocks the turn",
+        [
+            c.answers("status", "status")["end_turn_blocking"],
+            c.answers("overview", "overview")["end_turn_blocking"],
+            briefing["end_turn_blocking"],
+        ],
+        [decide] * 3,
     )
     c.refuses(
         "end_turn while Rostov's fate is open",
@@ -1454,6 +1477,9 @@ def turn_172(c):
     c.refuses(
         "stop_razing a city that is not burning", "city_task", "not being razed", city_id=ROSTOV, task="stop_razing"
     )
+
+
+def turn_172_trebuchet_and_spy(c):
     c.refuses(
         "set_up for a trebuchet already set up",
         "unit_action",
@@ -1562,8 +1588,8 @@ def turn_172_moscow_taken_from_poland(c):
     game_lua(CLOSE_QUESTION, GENERIC_POPUP)
     moscow = int(game_lua(MOSCOW_TAKEN_FROM_POLAND)[0])
     hear_and_acknowledge(c, "Moscow's second capture reaches the model", "Captured Moscow (city id %d)" % moscow)
-    puppet = c.answers("city_task: Moscow becomes a puppet", "city_task", city_id=moscow, task="puppet")
-    c.equal("Moscow is a puppet", puppet["city"].get("puppet"), True)
+    annexed = c.answers("city_task: annex Moscow at once", "city_task", city_id=moscow, task="annex")
+    c.equal("Moscow is annexed, not a puppet", annexed["city"].get("puppet"), None)
     c.refuses(
         "liberate a city whose fate is already decided",
         "city_task",
@@ -1637,12 +1663,13 @@ SCENARIO = [
     turn_161,
     turns_162_to_164,
     turns_165_to_168,
-    turn_168_great_works_clicked_and_received,
+    turn_168_pop_ups_raised_through_lua,
     turn_168_war_on_russia,
     turns_168_to_170_with_a_second_model,
     turn_170,
     turn_171,
-    turn_172,
+    turn_172_rostov_captured,
+    turn_172_trebuchet_and_spy,
     refusals_at_turn_172,
     turn_172_moscow_taken_from_poland,
     turn_172_free_choices,
@@ -1655,7 +1682,6 @@ READ_ONLY = {
     research_and_policies,
     every_unit_city_and_civ,
     deal_preview,
-    refusals_at_turn_172,
 }
 
 

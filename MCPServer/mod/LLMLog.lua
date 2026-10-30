@@ -1,7 +1,7 @@
 -- MCP Server for Bazaar UI add-in: the AI Log window (Game.GetLLMLog) and its chat with teammate
 -- seats, popup capture, leader screens left for a model, the mod list, the turn banner for seats,
 -- and tile coordinates.
--- Every game popup is reported to the DLL (Game.LLMNotePopup). It stays open
+-- Every game popup about what happened in the game is reported to the DLL (Game.LLMNotePopup). It stays open
 -- until the model acknowledges it; the DLL then names the dialog in Game.LLMDialogsToClose.
 include("InstanceManager");
 include("IconSupport");
@@ -340,7 +340,7 @@ local HUMAN_OPENED = {
 	[DiploUIStateTypes.DIPLO_UI_STATE_DEFAULT_ROOT] = true,
 	[DiploUIStateTypes.DIPLO_UI_STATE_CONFRONT_YOU_KILLED_MY_SPY] = true,
 };
-local LEADER_WATCH_FRAMES = 300;
+local LEADER_WATCH_SECONDS = 5;
 local g_LeaderWatch = 0;
 local g_HumanTalking = false;
 
@@ -356,7 +356,7 @@ local function OnLeaderMessage(iPlayer, iDiploUIState, szLeaderMessage)
 		return;
 	end
 	if Game.LLMTakeLeaderMessage(iPlayer, iDiploUIState, szLeaderMessage or "") then
-		g_LeaderWatch = LEADER_WATCH_FRAMES;
+		g_LeaderWatch = LEADER_WATCH_SECONDS;
 	end
 end
 Events.AILeaderMessage.Add(OnLeaderMessage);
@@ -368,7 +368,7 @@ end
 Events.LeavingLeaderViewMode.Add(OnHumanDoneTalking);
 Events.ActivePlayerTurnStart.Add(OnHumanDoneTalking);
 
-local function LeaveLeaderScreens()
+local function LeaveLeaderScreens(tickCount, timeIncrement)
 	if g_LeaderWatch <= 0 then
 		return;
 	end
@@ -376,7 +376,7 @@ local function LeaveLeaderScreens()
 		g_LeaderWatch = 0;
 		return;
 	end
-	g_LeaderWatch = g_LeaderWatch - 1;
+	g_LeaderWatch = g_LeaderWatch - (timeIncrement or 0);
 	local left = false;
 	for _, path in ipairs(LEADER_SCREENS) do
 		local control = ContextPtr:LookUpControl(path);
@@ -388,6 +388,7 @@ local function LeaveLeaderScreens()
 	if left then
 		UI.SetLeaderHeadRootUp(false);
 		UI.RequestLeaveLeader();
+		-- tests/ingame/run.py looks for this line in Lua.log.
 		print("LLMLog: left the leader screen for the model playing this civilization");
 	end
 end
@@ -526,17 +527,25 @@ local function Update(fDeltaTime)
 	end
 end
 
--- After a crash Bazaar turns the plugin off and every call to it raises. The first error closes the
--- window for good and is raised once more, so it still reaches Lua.log without repeating every frame.
+-- After a crash Bazaar turns the plugin off and every call to it raises: the first error then closes the
+-- window for good. An error of this window's own, while the plugin still answers, must not stop the relay of
+-- game pop-ups. Either way each error reaches Lua.log once, not every frame.
+local g_LastError = nil;
 ContextPtr:SetUpdate(function(fDeltaTime)
 	local ok, err = pcall(Update, fDeltaTime);
-	if not ok then
+	if ok then
+		return;
+	end
+	if not pcall(Game.GetLLMIdentity) then
 		g_Stopped = true;
 		ContextPtr:ClearUpdate();
 		Controls.Popup:SetHide(true);
 		Controls.OpenButton:SetHide(true);
-		error(err, 0);
+	elseif err == g_LastError then
+		return;
 	end
+	g_LastError = err;
+	error(err, 0);
 end);
 
 ContextPtr:SetInputHandler(function(uiMsg, wParam, lParam)

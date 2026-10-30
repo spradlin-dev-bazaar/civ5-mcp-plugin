@@ -662,11 +662,19 @@ MCP_TOOL(ToolMoveUnit)
 
 namespace
 {
-	// An order can use the unit up (a missionary's last spread, a great person's improvement, a nuke): look it up again.
-	void ReportUnitAfterOrder(JObj& o, CvPlayer* me, int iUnit, const std::string& name)
+	// An order can use the unit up or get it killed (a missionary's last spread, a great person's improvement, a nuke,
+	// a fighter shot down on a sweep), so the unit is looked up again by id, never read through u afterwards.
+	void PushOrderAndReport(JObj& o, CvPlayer* me, CvUnit* u, MissionTypes eMission, int iData1, int iData2)
 	{
+		int iUnit = u->GetID();
+		std::string name = UnitTypeName(u->getUnitType());
+		{
+			NetMessageScope scope;
+			u->PushMission(eMission, iData1, iData2, 0, false, true);
+		}
+		o["ok"] = J(true);
 		CvUnit* after = me->getUnit(iUnit);
-		if(!after || after->isDelayedDeath() || !after->plot()) o["unit_used_up"] = J("the " + name + " was used up");
+		if(!after || after->isDelayedDeath() || !after->plot()) o["unit_gone"] = J("the " + name + " is gone");
 		else o["unit"] = UnitJson(after);
 	}
 }
@@ -687,14 +695,7 @@ MCP_TOOL(ToolUnitAction)
 		BuildTypes eBuild = FindBuildType(key);
 		if(eBuild == NO_BUILD) { err = "unknown build type '" + key + "' (use unit_options to list builds_here)"; return JVal(); }
 		if(!u->canBuild(p, eBuild)) { err = "cannot do that build on this tile (wrong unit, tech missing, or terrain)"; return JVal(); }
-		int iUnit = u->GetID();
-		std::string name = UnitTypeName(u->getUnitType());
-		{
-			NetMessageScope scope;
-			u->PushMission(CvTypes::getMISSION_BUILD(), eBuild, -1, 0, false, true);
-		}
-		o["ok"] = J(true);
-		ReportUnitAfterOrder(o, me, iUnit, name);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_BUILD(), eBuild, -1);
 		return JVal(o);
 	}
 
@@ -729,10 +730,7 @@ MCP_TOOL(ToolUnitAction)
 		int x = 0, y = 0;
 		if(!RequireMoves(u, err) || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
 		if(!u->canRebaseAt(p, x, y)) { err = "this unit cannot rebase there (not an aircraft, out of range, or no city or carrier of yours at the tile)"; return JVal(); }
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_REBASE(), x, y, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_REBASE(), x, y);
 		return JVal(o);
 	}
 	if(action == "air_sweep")
@@ -740,10 +738,7 @@ MCP_TOOL(ToolUnitAction)
 		int x = 0, y = 0;
 		if(!RequireMoves(u, err) || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
 		if(!u->canAirSweepAt(x, y)) { err = "this unit cannot sweep that tile (not a fighter, out of range, or it already attacked this turn)"; return JVal(); }
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_AIR_SWEEP(), x, y, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_AIR_SWEEP(), x, y);
 		return JVal(o);
 	}
 	if(action == "paradrop")
@@ -751,10 +746,7 @@ MCP_TOOL(ToolUnitAction)
 		int x = 0, y = 0;
 		if(!RequireMoves(u, err) || !RequireInt(args, "x", x, err) || !RequireInt(args, "y", y, err)) return JVal();
 		if(!u->canParadropAt(p, x, y)) { err = "this unit cannot drop there (not a paratrooper, must start in your territory, target within range and not enemy-held)"; return JVal(); }
-		NetMessageScope scope;
-		u->PushMission(CvTypes::getMISSION_PARADROP(), x, y, 0, false, true);
-		o["ok"] = J(true);
-		o["unit"] = UnitJson(u);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_PARADROP(), x, y);
 		return JVal(o);
 	}
 	if(action == "nuke")
@@ -774,14 +766,7 @@ MCP_TOOL(ToolUnitAction)
 				return JVal();
 			}
 		}
-		int iUnit = u->GetID();
-		std::string name = UnitTypeName(u->getUnitType());
-		{
-			NetMessageScope scope;
-			u->PushMission(CvTypes::getMISSION_NUKE(), x, y, 0, false, true);
-		}
-		o["ok"] = J(true);
-		ReportUnitAfterOrder(o, me, iUnit, name);
+		PushOrderAndReport(o, me, u, CvTypes::getMISSION_NUKE(), x, y);
 		return JVal(o);
 	}
 	if(action == "disband")
@@ -807,19 +792,9 @@ MCP_TOOL(ToolUnitAction)
 			return JVal();
 		}
 		if(def.needsMoves && !RequireMoves(u, err)) return JVal();
-		int iUnit = u->GetID();
-		std::string name = UnitTypeName(u->getUnitType());
-		{
-			NetMessageScope scope;
-			u->PushMission(def.mission(), -1, -1, 0, false, true);
-		}
-		o["ok"] = J(true);
-		if(action == "found_city")
-		{
-			CvCity* c = p->getPlotCity();
-			if(c) o["city_founded"] = J(c->getName().c_str());
-		}
-		else ReportUnitAfterOrder(o, me, iUnit, name);
+		PushOrderAndReport(o, me, u, def.mission(), -1, -1);
+		CvCity* c = (action == "found_city") ? p->getPlotCity() : NULL;
+		if(c) o["city_founded"] = J(c->getName().c_str());
 		return JVal(o);
 	}
 
@@ -908,7 +883,7 @@ MCP_TOOL(ToolEndTurn)
 	if(!me) return JVal();
 	CvGame& g = GC.getGame();
 	bool bForce = ArgBool(args, "force", false);
-	std::string capture = UndecidedCapture(me);
+	std::string capture = PendingCaptureDecision(me);
 	if(!capture.empty()) { err = "end of turn blocked - " + capture; return JVal(); }
 	EndTurnBlockingTypes eBlock = EndTurnBlocking(me);
 	bool bIdleUnits = (eBlock == ENDTURN_BLOCKING_UNITS);
@@ -1160,7 +1135,7 @@ namespace
 		  "Blocks until it is your turn, a new request from another leader arrives, or your human teammate messages you (25 seconds by default; timeout_seconds sets another limit, up to 55), then returns status. Call it again if is_my_turn is still false.",
 		  "{\"type\":\"object\",\"properties\":{\"timeout_seconds\":{\"type\":\"number\"}}}", ToolStatus, LOG_NONE, true },
 		{ "briefing",
-		  "Start every turn with this: what happened since your last turn, game messages you must acknowledge, decisions waiting for you, nearby enemies, economy warnings, and a diplomacy snapshot. Events from last turn that an earlier briefing already showed are left out; since_turn shows every event from that turn on.",
+		  "Start every turn with this: what happened since your last turn, game messages you must acknowledge, decisions waiting for you, nearby enemies, economy warnings, and a diplomacy snapshot. Events from last turn that a briefing for this civilization showed during that turn, even to a session before yours, are left out; since_turn shows every event from that turn on.",
 		  "{\"type\":\"object\",\"properties\":{\"since_turn\":{\"type\":\"integer\"}}}", ToolBriefing, LOG_NONE, false },
 		{ "overview",
 		  "Your empire at a glance: treasury, yields, happiness, research, every city and every unit with its activity.",

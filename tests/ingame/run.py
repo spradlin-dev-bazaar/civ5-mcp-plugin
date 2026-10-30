@@ -66,6 +66,14 @@ what = "the Great Work pop-up the model acknowledged is closed"
 [[steps]]
 lua = 'ContextPtr:LookUpControl("/InGame/WhosWinningPopup"):IsHidden()'
 what = "the Who's Winning screen the model acknowledged is closed"
+
+[[steps]]
+lua = 'ContextPtr:LookUpControl("/InGame/LeagueSplash"):IsHidden()'
+what = "the World Congress screens the model acknowledged are closed"
+
+[[steps]]
+lua = 'ContextPtr:LookUpControl("/LeaderHeadRoot"):IsHidden()'
+what = "no leader screen is left open"
 """
 
 

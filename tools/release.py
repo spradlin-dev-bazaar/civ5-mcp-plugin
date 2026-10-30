@@ -6,9 +6,9 @@
     python tools/release.py workshop
 
 check: every copy of the version agrees with VERSION, and the release number follows the last release tagged here.
-build: builds the DLL and its .civ5mod from scratch against the SDK of the Bazaar release named in VERSION, downloaded
-from GitHub, or against a local SDK folder for a trial build, then checks what went into the package. Output goes to
-Build\\release.
+build: builds the DLL and its .civ5mod from scratch against the SDK of the Bazaar release on VERSION's sdk line,
+downloaded from GitHub, or against a local SDK folder for a trial build, then checks what went into the package. Output
+goes to Build\\release.
 publish: fetches GitHub's tags, pushes the release's tag and publishes the GitHub release with the package, its debug
 symbols and the given notes. It refuses a build made with --sdk or from anything but a clean, pushed main. If it stops
 after pushing the tag, it says how to finish: delete any half-made draft on GitHub, then run it again.
@@ -72,7 +72,7 @@ MAX_STEAM_TEXT = 7999
 
 NUMBER = "(?:0|[1-9][0-9]*)"
 TRIPLE = r"(%s\.%s\.%s)" % (NUMBER, NUMBER, NUMBER)
-FORMAT = re.compile(r"release %s\nbazaar %s\n?" % (TRIPLE, TRIPLE))
+FORMAT = re.compile(r"release %s\nbazaar %s\nsdk %s\n?" % (TRIPLE, TRIPLE, TRIPLE))
 TAG = re.compile(r"v%s" % TRIPLE)
 CHANGE_HEADING = re.compile(r"^\[b\]%s\[/b\]$" % TRIPLE, re.M)
 
@@ -85,14 +85,14 @@ def numbers(text):
     return tuple(int(n) for n in text.split("."))
 
 
-class Version(collections.namedtuple("Version", "release bazaar")):
+class Version(collections.namedtuple("Version", "release bazaar sdk")):
     @property
     def mod(self):
         return numbers(self.release)[2]
 
     @property
     def api(self):
-        return numbers(self.bazaar)[:2]
+        return numbers(self.sdk)[:2]
 
 
 ReleaseState = collections.namedtuple(
@@ -109,14 +109,31 @@ def parse_version(text):
     found = FORMAT.fullmatch(text)
     if not found:
         raise ReleaseError(
-            "VERSION should be 'release <major.minor.mod>' and 'bazaar <major.minor.patch>' on two lines; it reads %r"
-            % text
+            "VERSION should be 'release <major.minor.mod>', 'bazaar <major.minor.patch>' and "
+            "'sdk <major.minor.patch>' on three lines; it reads %r" % text
         )
-    return Version(found.group(1), found.group(2))
+    version = Version(found.group(1), found.group(2), found.group(3))
+    if numbers(version.sdk) < numbers(version.bazaar):
+        raise ReleaseError(
+            "VERSION's sdk %s is older than its bazaar %s; raise sdk to %s or newer"
+            % (version.sdk, version.bazaar, version.bazaar)
+        )
+    bazaar_api = numbers(version.bazaar)[:2]
+    if version.api != bazaar_api:
+        raise ReleaseError(
+            "VERSION's sdk %s is for Bazaar %d.%d, which Bazaar %s does not load plugins for; use an sdk from "
+            "Bazaar %d.%d, or raise bazaar if the plugin needs that SDK"
+            % (version.sdk, version.api[0], version.api[1], version.bazaar, bazaar_api[0], bazaar_api[1])
+        )
+    return version
 
 
 def bazaar_sentence(version):
     return "Requires Bazaar %s or newer." % version.bazaar
+
+
+def release_sentence(version, name):
+    return "This is %s %s, built with the Bazaar %s SDK." % (name, version.release, version.sdk)
 
 
 def mod_name(project):
@@ -139,8 +156,9 @@ def disagreements(version, header, project, workshop):
             "MCPServer.civ5proj's ModVersion is %s, not %d" % (mod.group(1) if mod else "missing", version.mod)
         )
     description = re.search(r"<Description>(.*?)</Description>", project, re.S)
-    if not description or bazaar_sentence(version) not in description.group(1):
-        problems.append("MCPServer.civ5proj's description does not say %r" % bazaar_sentence(version))
+    for sentence in (bazaar_sentence(version), release_sentence(version, mod_name(project))):
+        if not description or sentence not in description.group(1):
+            problems.append("MCPServer.civ5proj's description does not say %r" % sentence)
     if bazaar_sentence(version) not in workshop:
         problems.append("docs\\steam-workshop-description.txt does not say %r" % bazaar_sentence(version))
     return problems
@@ -204,7 +222,7 @@ def exported_api_version(data):
     return None
 
 
-def package_problems(folder, version):
+def package_problems(folder, version, name):
     modinfo = glob.glob(os.path.join(glob.escape(folder), "*.modinfo"))
     if len(modinfo) != 1:
         return ["the package has %d mod descriptions, not one" % len(modinfo)]
@@ -213,8 +231,9 @@ def package_problems(folder, version):
     mod = re.search(r'<Mod [^>]*\bversion="(\d+)"', text)
     if not mod or int(mod.group(1)) != version.mod:
         problems.append("the package's mod version is %s, not %d" % (mod.group(1) if mod else "missing", version.mod))
-    if bazaar_sentence(version) not in text:
-        problems.append("the package's description does not say %r" % bazaar_sentence(version))
+    for sentence in (bazaar_sentence(version), release_sentence(version, name)):
+        if sentence not in text:
+            problems.append("the package's description does not say %r" % sentence)
     if "<AffectsSavedGames>1</AffectsSavedGames>" not in text:
         problems.append("the package's mod does not affect saved games, so a loaded save would leave it off")
     updates = re.findall(r"<UpdateDatabase>([^<]+)</UpdateDatabase>", text)
@@ -479,7 +498,7 @@ def write_release(package, version, project, commit, clean, downloaded_sdk):
     unpacked = os.path.join(out, "unpacked")
     os.makedirs(unpacked)
     run([WINDOWS_TAR, "-xf", package, "-C", unpacked])
-    refuse(package_problems(unpacked, version))
+    refuse(package_problems(unpacked, version, mod_name(project)))
     shutil.copyfile(package, civ5mod)
     with zipfile.ZipFile(symbols, "w", zipfile.ZIP_DEFLATED) as z:
         for name in ("MCPServer.pdb", "MCPServer.map"):
@@ -492,11 +511,12 @@ def build(sdk_folder):
     version, problems = check()
     refuse(problems)
     trial = bool(sdk_folder)
-    sdk = sdk_root(os.path.abspath(sdk_folder), "the SDK") if trial else download_sdk(version.bazaar)
+    sdk = sdk_root(os.path.abspath(sdk_folder), "the SDK") if trial else download_sdk(version.sdk)
     api = sdk_api_version(sdk)
     if api != version.api:
         raise ReleaseError(
-            "the SDK in %s is API %d.%d; VERSION names Bazaar %s" % (sdk, api[0], api[1], version.bazaar)
+            "the SDK in %s is API %d.%d, not the %d.%d of VERSION's sdk %s"
+            % (sdk, api[0], api[1], version.api[0], version.api[1], version.sdk)
         )
     project = read_text(PROJECT)
     package = os.path.join(PACKAGES, "%s (v %d).civ5mod" % (mod_name(project), version.mod))
@@ -506,14 +526,13 @@ def build(sdk_folder):
         raise ReleaseError("the tree changed while building; build again")
     out = write_release(package, version, project, commit, clean, downloaded_sdk=not trial)
     print(
-        "%s %s, built against Bazaar %s from %s%s with a %s SDK, in %s"
+        "%s %s, built from %s%s with %s, in %s"
         % (
             mod_name(project),
             version.release,
-            version.bazaar,
             commit[:7],
             "" if clean else " plus uncommitted changes",
-            "local" if trial else "downloaded",
+            "a local SDK" if trial else "the downloaded Bazaar %s SDK" % version.sdk,
             out,
         )
     )
@@ -681,7 +700,11 @@ def main(argv):
     steps = parser.add_subparsers(dest="step", required=True)
     steps.add_parser("check")
     build_step = steps.add_parser("build")
-    build_step.add_argument("--sdk", help="a local Bazaar SDK folder, for a trial build that cannot be published")
+    build_step.add_argument(
+        "--sdk",
+        help="a local Bazaar SDK folder, for a trial build that cannot be published; its mod description still names"
+        " the SDK on VERSION's sdk line",
+    )
     publish_step = steps.add_parser("publish")
     publish_step.add_argument("--notes", required=True, help="the release notes, a Markdown file")
     steps.add_parser("workshop")
@@ -691,8 +714,8 @@ def main(argv):
             version, problems = check()
             refuse(problems)
             print(
-                "%s %s (mod version %d), for Bazaar %s"
-                % (mod_name(read_text(PROJECT)), version.release, version.mod, version.bazaar)
+                "%s %s (mod version %d), for Bazaar %s or newer, built with the Bazaar %s SDK"
+                % (mod_name(read_text(PROJECT)), version.release, version.mod, version.bazaar, version.sdk)
             )
         elif args.step == "build":
             build(args.sdk)

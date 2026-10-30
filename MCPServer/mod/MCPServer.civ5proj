@@ -8,7 +8,7 @@
     <ModVersion>4</ModVersion>
     <Stability>Experimental</Stability>
     <Teaser>Runs a local MCP server so an AI model can play Civilization V.</Teaser>
-    <Description>Runs an MCP server on this PC at http://127.0.0.1:7676/mcp. An AI model connected through an MCP client on the same PC, such as Claude Code, can play your civilization, a teammate or an opponent. Adds an AI Log button that shows what it is doing. Single player only. It is a plugin for the Bazaar Multi-DLL Mod Loader, which needs Bazaar - VMC Bootstrap (required); the game won't turn this mod on without both. Requires Bazaar 0.5.0 or newer.</Description>
+    <Description>Runs an MCP server on this PC at http://127.0.0.1:7676/mcp. An AI model connected through an MCP client on the same PC, such as Claude Code, can play your civilization, a teammate or an opponent. Adds an AI Log button that shows what it is doing. Single player only. It is a plugin for the Bazaar Multi-DLL Mod Loader, which needs Bazaar - VMC Bootstrap (required); the game won't turn this mod on without both. Requires Bazaar 0.5.0 or newer. This is MCP Server for Bazaar 0.2.4, built with the Bazaar 0.5.0 SDK.</Description>
     <Authors>maddachshund (spradlin-dev)</Authors>
     <SpecialThanks>
     </SpecialThanks>

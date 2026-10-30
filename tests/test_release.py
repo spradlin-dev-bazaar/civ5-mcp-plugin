@@ -20,22 +20,20 @@ import release  # noqa: E402
 
 HEADER = '#pragma once\n#define MCP_SERVER_VERSION "0.2.3"\n'
 SENTENCE = "Requires Bazaar 0.4.0 or newer."
+RELEASE_SENTENCE = "This is MCP Server for Bazaar 0.2.3, built with the Bazaar 0.4.1 SDK."
 PROJECT = (
-    "<Name>MCP Server for Bazaar</Name>\n<ModVersion>3</ModVersion>\n<Description>Plays Civ V. %s</Description>"
-    % (SENTENCE)
+    "<Name>MCP Server for Bazaar</Name>\n<ModVersion>3</ModVersion>\n<Description>Plays Civ V. %s %s</Description>"
+    % (SENTENCE, RELEASE_SENTENCE)
 )
 WORKSHOP = "[h1]MCP Server for Bazaar[/h1]\nPlays Civ V.\n\n%s\n" % SENTENCE
-VERSION = release.Version("0.2.3", "0.4.0")
-MODINFO = (
-    """<Mod id="x" version="3">
-  <Properties><Description>Plays Civ V. %s</Description><AffectsSavedGames>1</AffectsSavedGames></Properties>
+VERSION = release.Version("0.2.3", "0.4.0", "0.4.1")
+MODINFO = """<Mod id="x" version="3">
+  <Properties><Description>Plays Civ V. %s %s</Description><AffectsSavedGames>1</AffectsSavedGames></Properties>
   <Files><File md5="0" import="0">MCPServer.dll</File><File md5="0" import="0">LLMLog.lua</File></Files>
   <Actions><OnModActivated><UpdateDatabase>MCPServer.sql</UpdateDatabase></OnModActivated></Actions>
   <EntryPoints><EntryPoint type="InGameUIAddin" file="LLMLog.xml"><Name>AI Log</Name></EntryPoint></EntryPoints>
 </Mod>
-"""
-    % SENTENCE
-)
+""" % (SENTENCE, RELEASE_SENTENCE)
 CREATE_TABLE = "CREATE TABLE IF NOT EXISTS DllPlugins (File TEXT NOT NULL);\n"
 SQL = CREATE_TABLE + "INSERT INTO DllPlugins (File) VALUES ('MCPServer.dll');\n"
 PACKAGE_FILES = ("LICENSE.txt", "NOTICE.txt", "MCPServer.sql", "LLMLog.lua", "LLMLog.xml")
@@ -79,11 +77,14 @@ class VersionFileTest(unittest.TestCase):
                 f.write(data)
             return release.parse_version(release.read_text(path))
 
-    def test_a_release_and_a_bazaar_version_are_read(self):
-        self.assertEqual(self.read_file(b"release 0.1.1\nbazaar 0.4.0\n"), release.Version("0.1.1", "0.4.0"))
+    def test_a_release_a_bazaar_and_an_sdk_version_are_read(self):
+        self.assertEqual(
+            self.read_file(b"release 0.1.1\nbazaar 0.4.0\nsdk 0.4.2\n"), release.Version("0.1.1", "0.4.0", "0.4.2")
+        )
 
     def test_windows_line_ends_and_a_byte_order_mark_are_read(self):
-        self.assertEqual(self.read_file(codecs.BOM_UTF8 + b"release 0.1.1\r\nbazaar 0.4.0\r\n").release, "0.1.1")
+        data = codecs.BOM_UTF8 + b"release 0.1.1\r\nbazaar 0.4.0\r\nsdk 0.4.0\r\n"
+        self.assertEqual(self.read_file(data).release, "0.1.1")
 
     def test_the_parts_of_the_numbers_are_named(self):
         self.assertEqual(VERSION.mod, 3)
@@ -91,14 +92,28 @@ class VersionFileTest(unittest.TestCase):
 
     def test_a_malformed_file_stops(self):
         for text in (
-            "release 0.1\nbazaar 0.4.0\n",
-            "release 0.1.1\n",
-            "bazaar 0.4.0\nrelease 0.1.1\n",
-            "release 01.1.1\nbazaar 0.4.0\n",
-            "release 0.1.1\nbazaar 0.4.0\nmore\n",
+            "release 0.1\nbazaar 0.4.0\nsdk 0.4.0\n",
+            "release 0.1.1\nbazaar 0.4.0\n",
+            "bazaar 0.4.0\nrelease 0.1.1\nsdk 0.4.0\n",
+            "release 0.1.1\nsdk 0.4.0\nbazaar 0.4.0\n",
+            "release 01.1.1\nbazaar 0.4.0\nsdk 0.4.0\n",
+            "release 0.1.1\nbazaar 0.4.0\nsdk 0.4.0\nmore\n",
         ):
             with self.assertRaises(release.ReleaseError):
                 release.parse_version(text)
+
+    def test_an_sdk_older_than_the_bazaar_it_needs_stops(self):
+        with self.assertRaisesRegex(
+            release.ReleaseError, "sdk 0.4.1 is older than its bazaar 0.4.2; raise sdk to 0.4.2"
+        ):
+            release.parse_version("release 0.1.1\nbazaar 0.4.2\nsdk 0.4.1\n")
+
+    def test_an_sdk_for_a_newer_bazaar_api_stops(self):
+        with self.assertRaisesRegex(
+            release.ReleaseError,
+            "sdk 0.5.0 is for Bazaar 0.5, which Bazaar 0.4.2 does not .*use an sdk from Bazaar 0.4",
+        ):
+            release.parse_version("release 0.1.1\nbazaar 0.4.2\nsdk 0.5.0\n")
 
     def test_this_repository_agrees_with_itself(self):
         version = release.parse_version(release.read_text(release.VERSION_FILE))
@@ -128,13 +143,22 @@ class AgreementTest(unittest.TestCase):
         self.assert_one_problem_naming("ModVersion", project=PROJECT.replace("<ModVersion>3", "<ModVersion>2"))
 
     def test_a_description_naming_another_bazaar_is_named(self):
-        self.assert_one_problem_naming("description", project=PROJECT.replace("0.4", "0.3"))
+        self.assert_one_problem_naming("Requires Bazaar 0.4.0", project=PROJECT.replace("0.4.0", "0.3.0"))
 
     def test_a_description_with_half_the_sentence_is_named(self):
-        self.assert_one_problem_naming("description", project=PROJECT.replace(" or newer", ""))
+        self.assert_one_problem_naming("Requires Bazaar 0.4.0", project=PROJECT.replace(" or newer", ""))
 
-    def test_the_sentence_names_the_whole_bazaar_version(self):
-        self.assertEqual(release.bazaar_sentence(release.Version("0.2.3", "0.4.2")), "Requires Bazaar 0.4.2 or newer.")
+    def test_a_description_naming_another_release_or_sdk_is_named(self):
+        for old, new in (("Bazaar 0.2.3,", "Bazaar 0.2.2,"), ("0.4.1 SDK", "0.4.0 SDK"), (" " + RELEASE_SENTENCE, "")):
+            self.assert_one_problem_naming(RELEASE_SENTENCE, project=PROJECT.replace(old, new))
+
+    def test_the_sentences_name_the_whole_versions(self):
+        version = release.Version("0.2.3", "0.4.2", "0.4.5")
+        self.assertEqual(release.bazaar_sentence(version), "Requires Bazaar 0.4.2 or newer.")
+        self.assertEqual(
+            release.release_sentence(version, "MCP Server for Bazaar"),
+            "This is MCP Server for Bazaar 0.2.3, built with the Bazaar 0.4.5 SDK.",
+        )
 
 
 class OrderTest(unittest.TestCase):
@@ -238,7 +262,7 @@ class PackageTest(unittest.TestCase):
             if dll is not None:
                 with open(os.path.join(folder, "MCPServer.dll"), "wb") as f:
                     f.write(dll)
-            return release.package_problems(folder, VERSION)
+            return release.package_problems(folder, VERSION, "MCP Server for Bazaar")
 
     def assert_one_problem_naming(self, word, **kwargs):
         problems = self.problems(**kwargs)
@@ -262,7 +286,11 @@ class PackageTest(unittest.TestCase):
         self.assert_one_problem_naming("mod version", modinfo=MODINFO.replace('version="3"', 'version="2"'))
 
     def test_a_description_naming_another_bazaar_is_named(self):
-        self.assert_one_problem_naming("Bazaar", modinfo=MODINFO.replace("0.4", "0.3"))
+        self.assert_one_problem_naming("Requires Bazaar 0.4.0", modinfo=MODINFO.replace("0.4.0", "0.3.0"))
+
+    def test_a_description_naming_another_release_or_sdk_is_named(self):
+        for old, new in (("Bazaar 0.2.3,", "Bazaar 0.2.2,"), ("0.4.1 SDK", "0.4.0 SDK"), (" " + RELEASE_SENTENCE, "")):
+            self.assert_one_problem_naming(RELEASE_SENTENCE, modinfo=MODINFO.replace(old, new))
 
     def test_a_mod_that_does_not_affect_saved_games_is_named(self):
         modinfo = MODINFO.replace("<AffectsSavedGames>1", "<AffectsSavedGames>0")
@@ -314,6 +342,42 @@ class ReleaseFolderTest(unittest.TestCase):
                     f.write(text)
                 with self.assertRaises(release.ReleaseError):
                     release.read_build_info(out)
+
+
+class BuildTest(unittest.TestCase):
+    def build(self, sdk_api=(0, 4)):
+        """What build stops with, or None; self.downloads holds the SDK releases it downloaded and self.built the SDK
+        folders build.cmd was given."""
+        self.downloads = []
+        self.built = []
+
+        def download_sdk(bazaar):
+            self.downloads.append(bazaar)
+            return "sdk folder"
+
+        with (
+            mock.patch.object(release, "check", return_value=(VERSION, [])),
+            mock.patch.object(release, "download_sdk", download_sdk),
+            mock.patch.object(release, "sdk_api_version", return_value=sdk_api),
+            mock.patch.object(release, "read_text", return_value=PROJECT),
+            mock.patch.object(release, "tree_state", return_value=("abc", True)),
+            mock.patch.object(release, "run_build_cmd", lambda sdk, package: self.built.append(sdk)),
+            mock.patch.object(release, "write_release", return_value="out"),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            try:
+                release.build(None)
+                return None
+            except release.ReleaseError as e:
+                return str(e)
+
+    def test_it_builds_with_the_sdk_on_the_sdk_line(self):
+        self.assertIsNone(self.build())
+        self.assertEqual((self.downloads, self.built), (["0.4.1"], ["sdk folder"]))
+
+    def test_an_sdk_for_another_api_stops_before_building(self):
+        self.assertIn("is API 0.5, not the 0.4 of VERSION's sdk 0.4.1", self.build(sdk_api=(0, 5)))
+        self.assertEqual(self.built, [])
 
 
 GOOD_INFO = {"commit": "abc", "clean": True, "downloaded_sdk": True}
@@ -390,7 +454,7 @@ class PublishCommandTest(unittest.TestCase):
         self.assertEqual(create[create.index("--title") + 1], "Title")
 
     def test_it_is_published_as_a_full_release(self):
-        for version in (VERSION, release.Version("1.0.4", "0.4.0")):
+        for version in (VERSION, release.Version("1.0.4", "0.4.0", "0.4.0")):
             _, create = self.commands(version=version)
             self.assertNotIn("--draft", create)
             self.assertNotIn("--prerelease", create)
@@ -603,9 +667,11 @@ class WorkshopTest(unittest.TestCase):
         self.downloads = []
         self.sent = []
         files = {
-            release.VERSION_FILE: "release 0.2.4\nbazaar 0.4.0\n",
+            release.VERSION_FILE: "release 0.2.4\nbazaar 0.4.0\nsdk 0.4.1\n",
             release.VERSION_HEADER: HEADER.replace("0.2.3", "0.2.4"),
-            release.PROJECT: PROJECT.replace("<ModVersion>3", "<ModVersion>4"),
+            release.PROJECT: PROJECT.replace("<ModVersion>3", "<ModVersion>4").replace(
+                "Bazaar 0.2.3,", "Bazaar 0.2.4,"
+            ),
             release.WORKSHOP_TEXT: description,
             release.WORKSHOP_CHANGES: changes,
         }

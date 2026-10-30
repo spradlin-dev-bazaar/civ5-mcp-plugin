@@ -114,9 +114,14 @@ GREAT_WRITER, WORKER, WORKER_2, CARAVAN, GREAT_PROPHET = 344074, 90119, 98312, 2
 BERSERKER_GAO, BERSERKER_NORTH, BERSERKER_EAST, BERSERKER_WEST = 237568, 139269, 262155, 229377
 KNIGHT_EAST, SWORDSMAN, TREBUCHET_AARHUS, TREBUCHET_NEW = 204806, 106505, 294914, 352266
 MUSKETMAN, MISSIONARY, CAPTURED_WORKER, TREBUCHET_FARM, KNIGHT_KAUPANG = 401426, 385039, 409600, 327684, 335885
+ROSTOV, MOSCOW, POZNAN = 32771, 49156, 57349
 DENMARK, INDIA, RUSSIA, POLAND = 2, 3, 4, 5
-DELHI, VIJAYANAGARA, ROSTOV = 8192, 24578, 32771
+# Each civilization numbers its own cities and units, so the same number can name one of each.
+DELHI, MUMBAI, VIJAYANAGARA = 8192, 16385, 24578
+INDIAN_SPEARMAN, INDIAN_GREAT_ARTIST, INDIAN_KNIGHT = 49154, 458763, 172040
+NOVGOROD, RUSSIAN_MUSKETMAN = 24578, 294914
 ROSTOV_TILE, MOSCOW_TILE, MUSKETMAN_TILE = dict(x=54, y=37), dict(x=48, y=39), dict(x=37, y=27)
+TREBUCHET_FARM_TILE = dict(x=38, y=26)
 IDLE_UNITS = {
     BERSERKER_GAO: ("Berserker", "fortify"),
     TREBUCHET_FARM: ("Trebuchet", "sleep"),
@@ -147,6 +152,7 @@ FREE_CHOICES = (
     "local p = Players[%d] p:ChangeNumFreeGreatPeople(1) p:SetNumFreeTechs(1) p:ChangeNumFreePolicies(1)"
     " p:SetHasPolicy(GameInfoTypes.POLICY_REFORMATION, true)" % DENMARK
 )
+HUMAN_CHAT_TO_INDIA = 'Game.LLMChat(%d, "mcp_checks: India, hold the line near Rostov.")' % INDIA
 # A capture from someone other than the city's founder, the case where the game offers liberation.
 MOSCOW_TAKEN_FROM_POLAND = (
     "local p = Map.GetPlot(%(x)d, %(y)d)"
@@ -180,6 +186,10 @@ class Mcp:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             self.session = response.headers.get("Mcp-Session-Id") or self.session
             return response.status, response.read()
+
+    def close(self):
+        request = urllib.request.Request(URL, headers={"Mcp-Session-Id": self.session}, method="DELETE")
+        urllib.request.urlopen(request, timeout=30).close()
 
     def rpc(self, method, params=None, timeout=120):
         self.next_id += 1
@@ -383,14 +393,49 @@ def game_lua(code, state=game.IN_GAME):
         port.close()
 
 
-def second_model(c):
-    other = Checks(Mcp())
+def start_session(c, model, version):
+    c.mcp = Mcp()
+    c.mcp.connect()
+    c.mcp.notify("notifications/initialized")
+    label = "Test %s %s" % (model, version)
+    named = c.answers("set_identity for " + label, "set_identity", provider="Test", model=model, version=version)
+    c.equal(label + " is named", named.get("playing_as"), label)
+    return named
+
+
+def another_model(c, model, version):
+    other = Checks(None)
     other.results = c.results
-    other.mcp.connect()
-    other.mcp.notify("notifications/initialized")
-    named = other.answers("set_identity for a second model", "set_identity", provider="Test", model="Seat", version="2")
-    other.equal("the second model is named", named.get("playing_as"), "Test Seat 2")
+    start_session(other, model, version)
     return other
+
+
+def turn_comes(c, civ, turn):
+    status = wait_for_turn(c, turn)
+    c.equal("%s's turn %d comes" % (civ, turn), (status["civilization"], status["turn"]), (civ, turn))
+    return status
+
+
+def turn_comes_back(c, civ, turn):
+    status = c.mcp.call("wait_for_my_turn", timeout_seconds=20)
+    c.equal("%s's turn %d comes back" % (civ, turn), (status.get("is_my_turn"), status.get("turn")), (True, turn))
+
+
+def end_turn_forced(c, turn, summary):
+    ended = c.answers("end_turn %d: %s" % (turn, summary), "end_turn", summary="mcp_checks: " + summary, force=True)
+    c.equal("end_turn ends turn %d: %s" % (turn, summary), ended["ended_turn"], turn)
+
+
+def at_peace_with_russia_and_poland(c, what, briefing):
+    at_war = {m["civilization"]: m["at_war"] for m in briefing["diplomacy"]["civilizations_met"]}
+    c.check(what, {"Russia", "Poland"} <= set(at_war) and not any(at_war.values()), at_war)
+
+
+def request_from(briefing, civ, kind):
+    requests = [(r["from"], r["kind"]) for r in briefing["diplomacy_requests"]]
+    if (civ, kind) not in requests:
+        raise RuntimeError("no %s from %s among the requests %s" % (kind, civ, requests))
+    return briefing["diplomacy_requests"][requests.index((civ, kind))]
 
 
 def unit_of_type(c, unit_type, needs_orders=False):
@@ -494,6 +539,12 @@ def works_and_the_empire(c):
         "game_settings: map size, map type and pace",
         (settings["map_size"], settings["map_type"], settings["game_pace"]),
         ("Small", "ContinentsPlus", "Quick"),
+    )
+    options = {option["option"] for option in settings["options"]}
+    c.check(
+        "the save plays with quick combat and quick movement",
+        {"GAMEOPTION_QUICK_COMBAT", "GAMEOPTION_QUICK_MOVEMENT"} <= options,
+        sorted(options),
     )
     mods = c.answers("mods", "mods")
     c.equal(
@@ -1223,7 +1274,7 @@ def turn_168_war_on_russia(c):
 
 
 def turns_168_to_170_with_a_second_model(c):
-    india = second_model(c)
+    india = another_model(c, "Seat", "2")
     taken = india.answers("the second model takes India's seat", "take_seat", civ="India")
     india.equal("the second model plays India", taken["playing"], "India")
     offer = c.answers(
@@ -1257,8 +1308,7 @@ def turns_168_to_170_with_a_second_model(c):
         (True, 169, False),
     )
     india.answers("testing_mode off for India", "testing_mode", enabled=False)
-    status = wait_for_turn(c, 169)
-    c.equal("Denmark's turn 169 comes", (status["civilization"], status["turn"]), ("Denmark", 169))
+    turn_comes(c, "Denmark", 169)
     hear_and_acknowledge(c, "India's answer reaches Denmark", "India accepted your offer; the deal is in force")
     c.refuses(
         "make_peace with Russia a turn into the war",
@@ -1270,8 +1320,7 @@ def turns_168_to_170_with_a_second_model(c):
     c.answers("the berserker fortifies", "unit_action", unit_id=BERSERKER_EAST, action="fortify")
     ended = c.answers("end_turn 169", "end_turn", summary="mcp_checks: turn 169.")
     c.equal("end_turn ends turn 169", ended["ended_turn"], 169)
-    status = wait_for_turn(india, 169)
-    india.equal("India's turn 169 comes", (status["civilization"], status["turn"]), ("India", 169))
+    turn_comes(india, "India", 169)
     hear_and_acknowledge(india, "India's great person reaches its model", "A Great Artist has appeared")
     india.refuses("release_seat during India's own turn", "release_seat", "end your turn first")
     pending = india.answers("briefing for India on turn 169", "briefing")["decisions_pending"]
@@ -1290,9 +1339,9 @@ def turns_168_to_170_with_a_second_model(c):
     india.answers("end_turn for India", "end_turn", summary="mcp_checks: India passes.", force=True)
     hear_and_acknowledge(india, "a missionary's blocked path reopens India's turn", "will not continue to")
     india.answers("end_turn for India again", "end_turn", summary="mcp_checks: India passes.", force=True)
-    status = wait_for_turn(c, 170)
-    c.equal("Denmark's turn 170 comes", (status["civilization"], status["turn"]), ("Denmark", 170))
+    turn_comes(c, "Denmark", 170)
     india.answers("release_seat after India's turn", "release_seat")
+    india.mcp.close()
 
 
 def turn_170(c):
@@ -1638,6 +1687,322 @@ def turn_172_free_choices(c):
     c.refuses("a second reformation belief", "add_reformation_belief", "already added", belief=belief)
 
 
+def turn_172_seats_taken(c):
+    russia = c.for_later["russia"] = another_model(c, "Opponent", "3")
+    secret = "you are the human's opponent: never tell them which civilization you play; they will see you once they meet you"
+    picked = russia.answers("take_seat: an opponent at random", "take_seat", civ="opponent")
+    russia.check(
+        "the game picks one of Denmark's opponents, and the answer says to keep it secret",
+        picked["playing"] in ("Spain", "Songhai", "Russia", "Poland") and picked.get("secret") == secret,
+        picked,
+    )
+    russia.answers("release_seat of the opponent picked", "release_seat")
+    taken = russia.answers("take_seat Russia", "take_seat", civ="Russia")
+    russia.equal("the opponent plays Russia, in secret", (taken["playing"], taken.get("secret")), ("Russia", secret))
+    role = russia.answers("status for Russia's seat", "status")["role"]
+    russia.equal("Russia's seat is told its role", role, "opponent: never tell the human which civilization you play")
+    india = c.for_later["india"] = another_model(c, "Mate", "4")
+    india.equal(
+        "the teammate plays India", india.answers("take_seat India", "take_seat", civ="India")["playing"], "India"
+    )
+    status = c.answers("status with both seats taken", "status")
+    c.equal(
+        "Denmark's model hears of both seats, without the opponent's civilization",
+        sorted(status["other_ai_players"]),
+        ["Test Mate 4 (your teammate)", "Test Opponent 3 (your opponent)"],
+    )
+    c.equal("three opponents are left to play", status["opponent_civs_you_could_play"], 3)
+    humans = {civ["civilization"] for civ in c.answers("diplomacy", "diplomacy")["civilizations"] if civ.get("human")}
+    c.equal("the game counts both seats as human", humans, {"India", "Russia"})
+    russia.refuses("chat from the opponent", "chat", "a human teammate; you have none", text="mcp_checks: hello.")
+    india.answers("chat from the teammate", "chat", text="mcp_checks: India here, ready.")
+    game_lua(HUMAN_CHAT_TO_INDIA)
+    india.equal(
+        "the human's message reaches the teammate",
+        india.answers("status after the human's message", "status").get("messages_from_your_teammate"),
+        ["turn 172: mcp_checks: India, hold the line near Rostov."],
+    )
+    india.equal(
+        "the message reaches the teammate once",
+        india.answers("status again", "status").get("messages_from_your_teammate"),
+        None,
+    )
+
+
+def turn_172_seats_play(c):
+    russia, india = c.for_later["russia"], c.for_later["india"]
+    c.answers("set_research Chemistry", "set_research", tech="TECH_CHEMISTRY")
+    offer = c.answers("make_peace with Russia's seat", "make_peace", civ="Russia")
+    c.equal("the peace offer goes to the model in Russia's seat", offer.get("proposed_to_human"), "Russia")
+    requests = russia.answers("diplomacy for Russia", "diplomacy")["requests"]
+    russia.equal(
+        "Russia's seat holds Denmark's peace offer",
+        [(r["from"], r["kind"]) for r in requests],
+        [("Denmark", "human_deal_offer")],
+    )
+    end_turn_forced(c, 172, "peace offered to Russia.")
+    turn_comes(india, "India", 172)
+    waiting = russia.answers("status for Russia during India's turn", "status")
+    russia.check(
+        "Russia's seat is told the offer waits for its turn",
+        not waiting["is_my_turn"] and "deal offer" in waiting.get("diplomacy_waiting", ""),
+        waiting,
+    )
+    india.answers("set_research Economics", "set_research", tech="TECH_ECONOMICS")
+    upgraded = india.answers("upgrade_unit: India's spearman", "upgrade_unit", unit_id=INDIAN_SPEARMAN)
+    india.equal("the spearman becomes a pikeman", (upgraded["gold_spent"], upgraded["unit"]["name"]), (55, "Pikeman"))
+    gone = india.answers(
+        "India's great artist starts a golden age", "unit_action", unit_id=INDIAN_GREAT_ARTIST, action="golden_age"
+    )
+    india.equal("the great artist is used up", gone.get("unit_gone"), "the Great Artist is gone")
+    india.answers("India's knight rides south", "move_unit", unit_id=INDIAN_KNIGHT, x=48, y=32)
+    india.refuses("an attack with no moves left", "attack", "no moves left", unit_id=INDIAN_KNIGHT, x=47, y=33)
+    end_turn_forced(india, 172, "India passes.")
+    turn_comes(russia, "Russia", 172)
+    answered = russia.answers("answer_deal: Russia declines peace", "answer_deal", civ="Denmark", accept=False)
+    russia.equal("the peace offer is declined", answered["answered"], "declined")
+    hit = russia.answers(
+        "Russia's musketman attacks Denmark's trebuchet", "attack", unit_id=RUSSIAN_MUSKETMAN, **TREBUCHET_FARM_TILE
+    )
+    russia.equal("the trebuchet's and the musketman's hit points", (hit["target_hp"], hit["your_hp"]), (46, 58))
+    russia.answers("set_production in Novgorod", "set_production", city_id=NOVGOROD, item="UNIT_MUSKETMAN")
+    end_turn_forced(russia, 172, "Russia declines peace.")
+
+
+def turn_173_with_seats(c):
+    russia, india = c.for_later["russia"], c.for_later["india"]
+    turn_comes(c, "Denmark", 173)
+    hear_and_acknowledge(c, "Russia's answer reaches Denmark", "Russia declined your offer")
+    c.answers("the great prophet heads north", "move_unit", unit_id=GREAT_PROPHET, x=36, y=22)
+    c.answers("set_production Wealth in Moscow", "set_production", city_id=MOSCOW, item="PROCESS_WEALTH")
+    c.answers("set_production Musketman in Aarhus", "set_production", city_id=AARHUS, item="UNIT_MUSKETMAN")
+    end_turn_forced(c, 173, "the prophet heads north.")
+    turn_comes(india, "India", 173)
+    cleared = india.answers("India's knight attacks the barbarian camp", "attack", unit_id=INDIAN_KNIGHT, x=47, y=33)
+    india.equal("the camp's archer dies", cleared.get("target_destroyed"), True)
+    hear_and_acknowledge(india, "the camp's reward reaches India", "Cleared a barbarian camp: +16 gold")
+    offer = india.answers(
+        "propose_deal from India to Denmark",
+        "propose_deal",
+        civ="Denmark",
+        give=[{"item": "gold", "amount": 20}],
+        get=[{"item": "resource", "resource": "Iron", "amount": 1}],
+    )
+    india.equal("the offer goes to the model playing Denmark", offer.get("proposed_to_human"), "Denmark")
+    requests = c.answers("diplomacy for Denmark", "diplomacy")["requests"]
+    c.equal("Denmark holds India's offer", [(r["from"], r["kind"]) for r in requests], [("India", "human_deal_offer")])
+    end_turn_forced(india, 173, "India clears a camp.")
+    turn_comes(russia, "Russia", 173)
+    hear_and_acknowledge(russia, "Russia hears of a new city-state", "Met the city-state of Jerusalem")
+    hit = russia.answers(
+        "Russia's musketman attacks the trebuchet again", "attack", unit_id=RUSSIAN_MUSKETMAN, **TREBUCHET_FARM_TILE
+    )
+    russia.equal("the trebuchet is destroyed", (hit.get("target_destroyed"), hit["your_hp"]), (True, 42))
+    offer = russia.answers("make_peace from Russia's seat", "make_peace", civ="Denmark")
+    russia.equal("the peace offer goes to the model playing Denmark", offer.get("proposed_to_human"), "Denmark")
+    end_turn_forced(russia, 173, "Russia offers peace.")
+
+
+def turn_174_with_seats(c):
+    russia, india = c.for_later["russia"], c.for_later["india"]
+    turn_comes(c, "Denmark", 174)
+    briefing = c.answers("briefing on turn 174", "briefing")
+    c.equal("the trebuchet is gone", briefing.get("units_gone_since_last_turn"), ["Trebuchet (id 327684) at (38,26)"])
+    c.check(
+        "the briefing says how the trebuchet died",
+        "While defending, your Trebuchet was destroyed by a Russian Musketman (16 damage)!"
+        in [e["text"] for e in briefing["events"]],
+        event_summaries(briefing),
+    )
+    c.equal(
+        "both seats' offers wait for Denmark",
+        [(r["from"], r["kind"]) for r in briefing["diplomacy_requests"]],
+        [("India", "human_deal_offer"), ("Russia", "human_deal_offer")],
+    )
+    c.equal(
+        "answer_deal: Denmark accepts India's offer",
+        c.answers("answer_deal: India", "answer_deal", civ="India", accept=True)["answered"],
+        "accepted",
+    )
+    c.equal(
+        "answer_deal: Denmark declines Russia's peace",
+        c.answers("answer_deal: Russia", "answer_deal", civ="Russia", accept=False)["answered"],
+        "declined",
+    )
+    bombard = c.answers(
+        "city_attack: Copenhagen bombards Russia's musketman", "city_attack", city_id=COPENHAGEN, **TREBUCHET_FARM_TILE
+    )
+    c.equal("the bombard hurts the musketman", (bombard["target_hp_before"], bombard["target_hp"]), (42, 11))
+    end_turn_forced(c, 174, "Denmark takes India's offer.")
+    turn_comes_back(c, "Denmark", 174)
+    hear_and_acknowledge(
+        c,
+        "the great prophet's blocked path reaches Denmark's model",
+        "Your Great Prophet (id %d) at (36,23) will not continue to (36,22): no path leads there any more"
+        % GREAT_PROPHET,
+    )
+    c.answers("the great prophet sleeps", "unit_action", unit_id=GREAT_PROPHET, action="sleep")
+    end_turn_forced(c, 174, "the prophet rests.")
+    india.mcp.close()
+    resumed = start_session(india, "Mate", "4").get("resumed")
+    india.equal(
+        "a model that ends its session and comes back gets India back at once", resumed, "you are back on India"
+    )
+    turn_comes(india, "India", 174)
+    hear_and_acknowledge(india, "Denmark's answer reaches India", "Denmark accepted your offer; the deal is in force")
+    for city in (MUMBAI, VIJAYANAGARA):
+        india.answers(
+            "set_production Wealth in India's city %d" % city, "set_production", city_id=city, item="PROCESS_WEALTH"
+        )
+    india.answers("India's knight goes after a Russian worker", "move_unit", unit_id=INDIAN_KNIGHT, x=45, y=37)
+    end_turn_forced(india, 174, "India passes.")
+    turn_comes(russia, "Russia", 174)
+    hear_and_acknowledge(russia, "Denmark's answer reaches Russia", "Denmark declined your offer")
+    healed = russia.answers(
+        "promote_unit: the musketman heals", "promote_unit", unit_id=RUSSIAN_MUSKETMAN, promotion="PROMOTION_INSTA_HEAL"
+    )
+    russia.equal("the musketman heals 50 hit points", healed["unit"]["hp"], 61)
+    russia.answers(
+        "the musketman moves onto Denmark's great writer", "move_unit", unit_id=RUSSIAN_MUSKETMAN, x=38, y=25
+    )
+    end_turn_forced(russia, 174, "Russia strikes.")
+    turn_comes_back(russia, "Russia", 174)
+    end_turn_forced(russia, 174, "Russia passes.")
+
+
+def turn_175_poland_surrenders(c):
+    russia, india = c.for_later["russia"], c.for_later["india"]
+    turn_comes(c, "Denmark", 175)
+    briefing = c.answers("briefing on turn 175", "briefing")
+    c.equal(
+        "the great writer is gone", briefing.get("units_gone_since_last_turn"), ["Great Writer (id 450579) at (38,25)"]
+    )
+    surrender = request_from(briefing, "Poland", "deal_offer")
+    accepted = c.answers(
+        "respond_to_request: Denmark accepts Poland's surrender",
+        "respond_to_request",
+        id=surrender["id"],
+        choice="accept",
+    )
+    c.check(
+        "Poland surrenders Poznan",
+        accepted["deal"].get("surrendering") == "Poland"
+        and {"item": "city", "city": "Poznan", "city_id": POZNAN, "given_by": "Poland"} in accepted["deal"]["items"],
+        accepted["deal"],
+    )
+    decide = "decide the fate of Poznan (id %d) with city_task: annex, puppet or raze" % POZNAN
+    hear_and_acknowledge(c, "Poznan's question reaches the model", "Poznan (city id %d). Decide its fate" % POZNAN)
+    after = c.answers("briefing after the surrender", "briefing")
+    c.equal("Poznan's fate blocks the turn", after["end_turn_blocking"], "captured city: " + decide)
+    at_peace_with_russia_and_poland(c, "peace with Poland is peace with its teammate Russia", after)
+    statement = request_from(after, "Spain", "statement")
+    c.answers("respond_to_request: Spain's statement", "respond_to_request", id=statement["id"], choice="acknowledge")
+    puppet = c.answers("city_task: Poznan becomes a puppet", "city_task", city_id=POZNAN, task="puppet")
+    c.equal("Poznan is a puppet", puppet["city"].get("puppet"), True)
+    c.equal("the game's question about Poznan waits on screen", game_lua(QUESTION_OPEN, GENERIC_POPUP), ["true"])
+    game_lua(CLOSE_QUESTION, GENERIC_POPUP)
+    end_turn_forced(c, 175, "Poland surrenders.")
+    turn_comes(india, "India", 175)
+    at_peace_with_russia_and_poland(
+        india, "Denmark's peace binds India too", india.answers("briefing for India on turn 175", "briefing")
+    )
+    hear_and_acknowledge(india, "Poland's lapsed offer is withdrawn", "Poland withdrew request")
+    end_turn_forced(india, 175, "India passes.")
+    turn_comes_back(india, "India", 175)
+    hear_and_acknowledge(
+        india,
+        "the knight's blocked path reaches India",
+        "Your Knight (id %d) at (47,36) will not continue to (45,37): no path leads there any more" % INDIAN_KNIGHT,
+    )
+    india.answers("India's knight sleeps", "unit_action", unit_id=INDIAN_KNIGHT, action="sleep")
+    end_turn_forced(india, 175, "India's knight stands down.")
+    turn_comes(russia, "Russia", 175)
+    end_turn_forced(russia, 175, "Russia passes.")
+
+
+def turn_176_world_congress(c):
+    russia, india = c.for_later["russia"], c.for_later["india"]
+    status = turn_comes(c, "Denmark", 176)
+    votes_due = "league_votes: the World Congress wants votes (congress / vote_resolution / abstain)"
+    c.equal("the World Congress's votes block the turn", status.get("end_turn_blocking"), votes_due)
+    congress = c.answers("congress in session", "congress")
+    c.equal(
+        "the Congress, its host and what it votes on",
+        (
+            congress["in_session"],
+            congress["host"],
+            [(p["id"], p["name"], p["proposed_by"]) for p in congress["proposals_awaiting_votes"]],
+        ),
+        (True, "Russia", [(1, "ENACT: Embargo City-States", "Spain"), (2, "ENACT: Ban Luxury: Citrus", "Russia")]),
+    )
+    c.equal("Denmark has one vote", (congress["my_votes_total"], congress["my_votes_remaining"]), (1, 1))
+    hear_and_acknowledge(c, "Denmark's great artist's pop-up reaches the model", "A Great Artist has appeared")
+    voted = c.answers("vote_resolution: Denmark votes Nay", "vote_resolution", resolution_id=2, choice="Nay", votes=1)
+    c.equal("Denmark's vote is cast", (voted["votes_cast"], voted["votes_remaining"]), (1, 0))
+    end_turn_forced(c, 176, "Denmark votes Nay.")
+    status = turn_comes(india, "India", 176)
+    india.equal("the votes block India's turn", status.get("end_turn_blocking"), votes_due)
+    india.equal("abstain", india.answers("abstain from India's seat", "abstain")["votes_remaining"], 0)
+    briefing = india.answers("briefing for India on turn 176", "briefing")
+    india.equal(
+        "three civilizations offer India embassies",
+        sorted((r["from"], [i["item"] for i in r["deal"]["items"]]) for r in briefing["diplomacy_requests"]),
+        [(civ, ["embassy", "embassy"]) for civ in ("Poland", "Songhai", "Spain")],
+    )
+    for civ, choice in (("Poland", "accept"), ("Spain", "decline"), ("Songhai", "decline")):
+        offer = request_from(briefing, civ, "deal_offer")
+        india.answers(
+            "respond_to_request: India answers %s: %s" % (civ, choice),
+            "respond_to_request",
+            id=offer["id"],
+            choice=choice,
+        )
+    end_turn_forced(india, 176, "India abstains.")
+    turn_comes(russia, "Russia", 176)
+    congress = russia.answers("congress for its host", "congress")
+    russia.equal("the host has an extra delegate", (congress["my_votes_total"], congress["my_votes_remaining"]), (2, 2))
+    voted = russia.answers(
+        "vote_resolution: Russia votes Yea", "vote_resolution", resolution_id=2, choice="Yea", votes=2
+    )
+    russia.equal("Russia's votes are cast", (voted["votes_cast"], voted["votes_remaining"]), (2, 0))
+    congress = russia.answers("congress after Russia's vote", "congress")
+    russia.equal(
+        "the votes cast still count in the host's total",
+        (congress["my_votes_total"], congress["my_votes_remaining"]),
+        (2, 0),
+    )
+    end_turn_forced(russia, 176, "Russia votes Yea.")
+
+
+def turn_177_congress_results(c):
+    russia, india = c.for_later["russia"], c.for_later["india"]
+    turn_comes(c, "Denmark", 177)
+    congress = c.answers("congress after the session", "congress")
+    c.equal(
+        "both resolutions are in force, named without the next session's proposals",
+        (congress["in_session"], [a["name"] for a in congress["active_resolutions"]]),
+        (False, ["Embargo City-States", "Ban Luxury: Citrus"]),
+    )
+    c.equal("between sessions Denmark still has one vote", congress["my_votes_total"], 1)
+    c.equal(
+        "Spain proposes a repeal for the next session",
+        [(p["name"], p["proposed_by"]) for p in congress["proposals_awaiting_votes"]],
+        [("REPEAL: Ban Luxury: Citrus", "Spain")],
+    )
+    briefing = c.answers("briefing on turn 177", "briefing")
+    c.check(
+        "the briefing says how the seats voted",
+        "ENACT: Ban Luxury: Citrus was passed. Its effects are now active.;"
+        " 2 for Yea from Russia; 1 for Yea from Poland; 1 for Nay from Denmark"
+        in [e["text"] for e in briefing["events"]],
+        event_summaries(briefing),
+    )
+    answer_requests(c, briefing, [("Spain", "statement")], "acknowledge")
+    for seat, civ in ((russia, "Russia"), (india, "India")):
+        seat.answers("release_seat: %s" % civ, "release_seat")
+        seat.mcp.close()
+
+
 SCENARIO = [
     connecting,
     naming,
@@ -1673,6 +2038,13 @@ SCENARIO = [
     refusals_at_turn_172,
     turn_172_moscow_taken_from_poland,
     turn_172_free_choices,
+    turn_172_seats_taken,
+    turn_172_seats_play,
+    turn_173_with_seats,
+    turn_174_with_seats,
+    turn_175_poland_surrenders,
+    turn_176_world_congress,
+    turn_177_congress_results,
 ]
 # Steps that only look: when one fails, the steps after it still find the game as they expect.
 READ_ONLY = {

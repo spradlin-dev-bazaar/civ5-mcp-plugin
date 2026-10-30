@@ -91,6 +91,6 @@ bool McpEngineSeesAsHuman(PlayerTypes e);
 void McpNoteSeatPopup(PlayerTypes ePlayer, int iType, int iData1, int iData2, int iData3, bool bOption1, const std::string& text);
 // Game thread. Echoes a notification for a civilization a model plays into its log.
 void McpNoteSeatNotification(PlayerTypes ePlayer, const char* szMessage, const char* szSummary);
-// Game thread, just before the game drops a unit's queued move. A seat's model is told, as a
-// game message, that the move will not continue and why; other owners' units are ignored.
+// Game thread, just before the game drops a unit's queued move. A model playing the unit's owner,
+// in a seat or on screen, is told as a game message that the move will not continue and why.
 void McpNoteOrdersCancelled(CvUnit* u, CivOrdersCancelledReason reason);

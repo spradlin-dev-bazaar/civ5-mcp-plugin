@@ -131,7 +131,10 @@ MCP_TOOL(ToolCongress)
 	o["turns_until_session"] = J(pLeague->GetTurnsUntilSession());
 	o["member"] = J(pLeague->IsMember(e));
 	o["my_votes_remaining"] = J(pLeague->GetRemainingVotesForMember(e));
-	o["my_votes_total"] = J(pLeague->GetCoreVotesForMember(e));
+	// As the game's own World Congress screen counts them. The core votes leave out the host's and other extra delegates;
+	// in session, the starting votes would follow alliances made since the votes were dealt.
+	o["my_votes_total"] = J(pLeague->IsInSession() ? pLeague->GetRemainingVotesForMember(e) + pLeague->GetSpentVotesForMember(e)
+	                                                  : pLeague->CalculateStartingVotesForMember(e));
 	o["my_proposals_remaining"] = J(pLeague->GetRemainingProposalsForMember(e));
 
 	JArr active;
@@ -140,7 +143,8 @@ MCP_TOOL(ToolCongress)
 	{
 		JObj a;
 		a["id"] = J(it->GetID());
-		a["name"] = J(StripMarkup(pLeague->GetResolutionName(it->GetType(), it->GetID(), it->GetProposerDecision() ? it->GetProposerDecision()->GetDecision() : LeagueHelpers::CHOICE_NONE, true).c_str()));
+		// No prefix: the game names an active resolution "REPEAL: ..." while a repeal of it is proposed.
+		a["name"] = J(StripMarkup(pLeague->GetResolutionName(it->GetType(), it->GetID(), it->GetProposerDecision() ? it->GetProposerDecision()->GetDecision() : LeagueHelpers::CHOICE_NONE, false).c_str()));
 		a["enacted_turn"] = J(it->GetTurnEnacted());
 		if(pLeague->CanPropose(e)) a["can_propose_repeal"] = J(pLeague->CanProposeRepeal(it->GetID(), e));
 		active.push_back(JVal(a));

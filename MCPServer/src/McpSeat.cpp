@@ -317,7 +317,7 @@ namespace
 
 void McpNoteOrdersCancelled(CvUnit* u, CivOrdersCancelledReason reason)
 {
-	if(!u || !McpIsSeat(u->getOwner())) return;
+	if(!u || !McpPlayedByModel(u->getOwner())) return;
 	const MissionData* m = u->GetHeadMissionData();
 	if(!m || (m->eMissionType != CvTypes::getMISSION_MOVE_TO() && m->eMissionType != CvTypes::getMISSION_ROUTE_TO())) return;
 	CvUnitEntry* info = GC.getUnitInfo(u->getUnitType());

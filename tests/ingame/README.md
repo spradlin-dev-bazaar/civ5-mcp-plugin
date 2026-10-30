@@ -6,18 +6,18 @@
 python tests\ingame\run.py [package.civ5mod or mod folder]
 ```
 
-Without an argument it checks the mod folder `MCPServer\build.cmd` made, and refuses if a source file changed after that build. It installs the build as a test build, with the mod version 900 above the one in the `.civ5proj`, so a copy of the released mod you have installed, such as Steam's, is never replaced. Given a package or a mod folder, it checks that one as it is: use this for a release's package, and know that it takes the place of an installed copy of the same mod version for the run. Either way the plugin must report the release in `VERSION`.
+Without an argument it checks the mod folder `MCPServer\build.cmd` made, and refuses if a source file changed after that build. It installs the build as a test build, with its mod version raised into the range Bazaar's checker keeps for test builds, so a copy of the released mod you have installed, such as Steam's, is never replaced. Given a package or a mod folder, it checks that one as it is: use this for a release's package, and know that it takes the place of an installed copy of the same mod version for the run. Either way the plugin must report the release in `VERSION`.
 
 A run takes about five minutes and prints PASS or FAIL for each check, then a one-line summary.
 
-If `run.py` itself is killed part way, the checker carries on without it. While the game is handed over, the checker waits for it: run `python -m bazaar_check --hand-back` in `tests\ingame` and it closes the game and puts your files back. Ctrl+C in `run.py`'s window reaches the checker too, which then stops as `bazaar_check\README.md` describes.
+If `run.py` itself is killed part way, the checker carries on without it. While the game is handed over, the checker waits for it: run `python -m bazaar_check --hand-back` in `tests\ingame` and it closes the game and puts your files back. A killed run also leaves the test save in your saves folder as `MCP Server checks`: later runs use it as it is, and you can delete it. Ctrl+C in `run.py`'s window reaches the checker too, which then stops as `bazaar_check\README.md` describes.
 
 ## What a run does
 
 1. Bazaar's checker, the `bazaar_check` folder, starts Civilization V through Steam with the build and the mods it needs, and loads `saves\mcp_test.Civ5Save`.
 2. It hands the game over, and `mcp_checks.py` calls the plugin's tools over MCP in a fixed order, checking each answer.
 3. Before handing the game back, `run.py` saves a picture of the game window to `Build\ingame\game.png`: if a check failed, it shows what was on screen.
-4. The checker takes the game back, closes it, puts back everything it changed in your Civilization V folder, and checks that no plugin crashed and that `Lua.log` has no Lua errors.
+4. The checker takes the game back and checks in `Lua.log` that the AI Log closed the leader screen the checks opened. Then it closes the game, puts back everything it changed in your Civilization V folder, and checks that no plugin crashed and that `Lua.log` has no Lua errors.
 
 ## Before the first run
 

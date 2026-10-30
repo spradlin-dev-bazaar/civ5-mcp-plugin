@@ -4,9 +4,9 @@ game back, closes it, puts the player's files back and checks that nothing crash
 
     python tests/ingame/run.py [package.civ5mod or mod folder]
 
-Without an argument it checks the mod folder build.cmd made, as a test build with mod version 900 above the .civ5proj's,
-so it never replaces an installed copy of the released mod. A run takes about five minutes and needs what
-bazaar_check/README.md lists, with Bazaar and its VMC Bootstrap installed.
+Without an argument it checks the mod folder build.cmd made, as a test build: its mod version is raised into the range
+Bazaar's checker keeps for test builds, so it never replaces an installed copy of the released mod. A run takes about
+five minutes and needs what bazaar_check/README.md lists, with Bazaar and its VMC Bootstrap installed.
 """
 
 import contextlib
@@ -28,10 +28,9 @@ PROJECT = os.path.join(MOD_SOURCE, "MCPServer.civ5proj")
 BUILT = os.path.join(REPO, "MCPServer", "Build")
 SAVE = os.path.join(HERE, "saves", "mcp_test.Civ5Save")
 SCREENSHOT = os.path.join(REPO, "Build", "ingame", "game.png")
-# The checker counts mod versions from 900 up as test builds.
-TEST_VERSION_OFFSET = 900
 # The checker loads saves only from the player's saves folder, so the save goes there for the run under its own name.
 STAGED = "MCP Server checks"
+# The hand_over step's message: the checker prints it once the game is handed over, and that line starts the MCP checks.
 HAND_OVER = "mcp_checks.py is calling the plugin over MCP."
 SCREENSHOT_SECONDS = 60
 
@@ -50,6 +49,11 @@ load = %(save)s
 
 [[steps]]
 hand_over = %(hand_over)s
+
+[[steps]]
+log = "Lua.log"
+has = "left the leader screen for the model"
+what = "the AI Log left a leader screen for the model"
 """
 
 
@@ -91,7 +95,9 @@ def test_build(folder):
     source = newest_source()
     if os.path.getmtime(source) > os.path.getmtime(modinfo[0]):
         stop("%s changed after the last build; build the plugin with MCPServer\\build.cmd first" % source)
-    version = TEST_VERSION_OFFSET + int(project_field("ModVersion"))
+    version = files.TEST_VERSION + int(project_field("ModVersion"))
+    if version >= files.ANY_VERSION:
+        stop("test mod version %d is not below the checker's %d" % (version, files.ANY_VERSION))
     staged = os.path.join(folder, "%s (v %d)" % (project_field("Name"), version))
     shutil.copytree(built, staged)
     path = os.path.join(staged, os.path.basename(modinfo[0]))
@@ -116,9 +122,9 @@ def staged_save():
     ours = not os.path.exists(staged)
     if not ours and not filecmp.cmp(staged, SAVE, shallow=False):
         stop("%s is not this repository's test save; move it away, then run this again" % staged)
-    if ours:
-        shutil.copyfile(SAVE, staged)
     try:
+        if ours:
+            shutil.copyfile(SAVE, staged)
         yield
     finally:
         if ours:
@@ -181,10 +187,11 @@ def follow(log, checker):
 
 
 def run_checker(checks_file, folder):
-    """Plays the checks file, running the MCP checks at its hand-over. Returns their results, or None if the checker ended
-    before it handed the game over, and the checker's exit code. The checker writes to a log rather than to this script,
-    so it outlives this script if this script is killed: it still puts the player's files back, once given the game back
-    with python -m bazaar_check --hand-back. Ctrl+C reaches both, and the checker then stops by its own rules."""
+    """Plays the checks file, running the MCP checks at its hand-over. Returns their results, or None if the checker
+    ended before it handed the game over, and the checker's exit code. The checker writes to a log rather than to this
+    script, so it outlives this script if this script is killed: it still puts the player's files back, once given the
+    game back with python -m bazaar_check --hand-back. Ctrl+C reaches both, and the checker then stops by its own
+    rules."""
     log_path = os.path.join(folder, "checker.log")
     with open(log_path, "w", encoding="utf-8") as out:
         checker = subprocess.Popen(
@@ -209,6 +216,7 @@ def run_checker(checks_file, folder):
 
 
 def main(argv):
+    sys.stdout.reconfigure(errors="replace")
     folder = tempfile.mkdtemp(prefix="mcp checks ")
     try:
         if argv:

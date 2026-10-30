@@ -91,15 +91,16 @@ namespace
 		return 0;
 	}
 
-	//bool LLMTakeLeaderMessage(int player, int diploUIState, string text, int activePlayer); true when a model plays the
-	// civilization on screen: the leader's words become its game message, and the caller closes the leader screen.
+	//bool LLMTakeLeaderMessage(int leader, int diploUIState, string text); true when a model plays the civilization on
+	// screen: the leader's words become its game message, and the caller closes the leader screen.
 	int lLLMTakeLeaderMessage(lua_State* L)
 	{
 		const bool bTaken = McpBridge::Get().ScreenPlayed();
 		if(bTaken)
 		{
 			const char* szText = lua_tostring(L, 3);
-			McpBridge::Get().NotePopup(lua_tointeger(L, 4), MCP_POPUP_LEADER_MESSAGE, lua_tointeger(L, 1), lua_tointeger(L, 2), 0, false, szText ? szText : "", false);
+			// Not bOnScreen, whose popups are dropped once nobody plays the screen: this screen is closed already.
+			McpBridge::Get().NotePopup(GC.getGame().getActivePlayer(), MCP_POPUP_LEADER_MESSAGE, lua_tointeger(L, 1), lua_tointeger(L, 2), 0, false, szText ? szText : "", false);
 		}
 		lua_pushboolean(L, bTaken);
 		return 1;

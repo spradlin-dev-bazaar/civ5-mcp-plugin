@@ -1,5 +1,6 @@
 -- MCP Server for Bazaar UI add-in: the AI Log window (Game.GetLLMLog) and its chat with teammate
--- seats, popup capture, the mod list, the turn banner for seats, and tile coordinates.
+-- seats, popup capture, leader screens left for a model, the mod list, the turn banner for seats,
+-- and tile coordinates.
 -- Every game popup is reported to the DLL (Game.LLMNotePopup). It stays open
 -- until the model acknowledges it; the DLL then names the dialog in Game.LLMDialogsToClose.
 include("InstanceManager");
@@ -349,13 +350,13 @@ local function OnLeaderMessage(iPlayer, iDiploUIState, szLeaderMessage)
 		g_LeaderWatch = 0;
 		return;
 	end
-	if Game.LLMTakeLeaderMessage(iPlayer, iDiploUIState, szLeaderMessage or "", Game.GetActivePlayer()) then
+	if Game.LLMTakeLeaderMessage(iPlayer, iDiploUIState, szLeaderMessage or "") then
 		g_LeaderWatch = LEADER_WATCH_FRAMES;
 	end
 end
 Events.AILeaderMessage.Add(OnLeaderMessage);
 
--- The turn start is for a human-opened screen that never entered the leader view.
+-- Some screens the human opens never enter the leader view, so the next turn start ends their conversation too.
 local function OnHumanDoneTalking()
 	g_HumanTalking = false;
 end

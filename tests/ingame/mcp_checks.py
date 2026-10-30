@@ -534,24 +534,25 @@ def turn_151(c):
     answer_requests(c, briefing, [("Songhai", "deal_offer")])
     reply = c.answers("discuss: ask Russia for friendship", "discuss", civ="Russia", topic="ask_friendship")
     c.check("discuss gives Russia's reply", reply.get("their_reply"), reply)
-    said = wait_for_message(c, "Russia's leader says")
+    said, unread = wait_for_message(c, "Russia's leader says")
     c.check(
         "Russia's leader screen reaches the model as a game message",
         said,
-        "no unread game message from Russia's leader within 20 seconds",
+        "no unread game message with McpPopups.cpp's wording; the unread ones: %s" % ("; ".join(unread) or "none"),
     )
     c.answers("acknowledge the leader's words", "acknowledge_messages")
 
 
 def wait_for_message(c, text, seconds=20):
-    """The unread game message containing text, or None: the game reports it a few frames after the event."""
+    """The unread game message containing text, or None, and the unread messages: the game reports it a few frames
+    after the event."""
     deadline = time.time() + seconds
-    while time.time() < deadline:
-        for message in c.mcp.call("briefing")["game_messages"]:
-            if message.get("unread") and text in message["text"]:
-                return message["text"]
+    while True:
+        unread = [m["text"] for m in c.mcp.call("briefing")["game_messages"] if m.get("unread")]
+        said = next((message for message in unread if text in message), None)
+        if said or time.time() >= deadline:
+            return said, unread
         time.sleep(1)
-    return None
 
 
 def seats(c):
@@ -599,8 +600,8 @@ READ_ONLY = {
 
 
 def run():
-    """Plays the scenario in order and returns its results. A failed step that changes the game, or may have, stops the
-    scenario, since every later step expects the game as the earlier ones left it."""
+    """Plays the scenario in order and returns its results. A step that changes the game, or may have, and ends early
+    stops the scenario, since every later step expects the game as the earlier ones left it."""
     c = Checks(Mcp())
     for number, step in enumerate(SCENARIO):
         print(step.__name__.replace("_", " "), flush=True)

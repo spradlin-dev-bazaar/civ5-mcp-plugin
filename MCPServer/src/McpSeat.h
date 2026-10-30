@@ -15,6 +15,8 @@ class CvUnit;
 // game; several models can each hold one. A seat is never the player on screen, so the
 // game's popups for it are recorded for its model instead of shown.
 bool McpIsSeat(PlayerTypes e);
+// Game thread. A civilization some model plays: a seat, or the one on screen while a session plays it.
+bool McpPlayedByModel(PlayerTypes e);
 bool McpAnySeat();
 // Seats no live session plays right now (a model that reconnects takes its seat back).
 std::vector<PlayerTypes> McpUnboundSeats();

@@ -29,7 +29,7 @@ namespace
 	{
 		int id;
 		int turn;
-		PlayerTypes to;   // the seat it is for
+		PlayerTypes to;   // the civilization it is for: a seat, or the one on screen a model plays
 		PlayerTypes from;
 		DiploUIStateTypes state;
 		std::string message;
@@ -259,21 +259,21 @@ namespace
 		return "";
 	}
 
-	// Drops the seat's requests the game can no longer carry out and tells the seat why, as a
+	// Drops a civilization's requests the game can no longer carry out and tells its model why, as a
 	// game message, so an offer never sits in the list only to fail when it is accepted.
 	// Returns the notices, for a tool that wants to repeat them in its own reply.
-	JArr PruneStale(PlayerTypes eSeat)
+	JArr PruneStale(PlayerTypes ePlayer)
 	{
 		JArr withdrawn;
 		for(size_t i = s_requests.size(); i-- > 0;)
 		{
 			DiploRequest& r = s_requests[i];
-			if(r.to != eSeat) continue;
+			if(r.to != ePlayer) continue;
 			std::string why = StaleReason(r);
 			if(why.empty()) continue;
 			std::string text = McpFormat("%s withdrew request #%d (%s): %s", CivName(r.from).c_str(), r.id, StateName(r.state), why.c_str());
 			s_requests.erase(s_requests.begin() + i);
-			McpBridge::Get().NotePopup(eSeat, MCP_POPUP_TEXT, 0, 0, 0, false, text, false);
+			McpBridge::Get().NotePopup(ePlayer, MCP_POPUP_TEXT, 0, 0, 0, false, text, false);
 			withdrawn.push_back(J(text));
 		}
 		return withdrawn;
@@ -733,16 +733,16 @@ void McpNoteDealResolved(PlayerTypes eFrom, PlayerTypes eTo, PlayerTypes eActBy,
 	PlayerTypes ends[2] = { eFrom, eTo };
 	for(int i = 0; i < 2; ++i)
 	{
-		PlayerTypes eSeat = ends[i];
-		if(!McpIsSeat(eSeat) || eActBy == eSeat) continue; // the tool that acted already reported the result
-		PlayerTypes eOther = (eFrom == eSeat) ? eTo : eFrom;
-		std::string what = (eFrom == eSeat) ? "your offer" : "their offer";
+		PlayerTypes ePlayer = ends[i];
+		if(!McpPlayedByModel(ePlayer) || eActBy == ePlayer) continue; // the tool that acted already reported the result
+		PlayerTypes eOther = (eFrom == ePlayer) ? eTo : eFrom;
+		std::string what = (eFrom == ePlayer) ? "your offer" : "their offer";
 		std::string text;
 		if(!bStillValid) text = CivName(eOther) + ": " + what + " expired; something in it is no longer available";
 		else if(bAccepted) text = CivName(eOther) + " accepted " + what + "; the deal is in force";
 		else if(eActBy == eFrom) text = CivName(eOther) + " withdrew " + what;
 		else text = CivName(eOther) + " declined " + what;
-		McpBridge::Get().NotePopup(eSeat, MCP_POPUP_TEXT, 0, 0, 0, false, text, false);
+		McpBridge::Get().NotePopup(ePlayer, MCP_POPUP_TEXT, 0, 0, 0, false, text, false);
 	}
 }
 
@@ -760,7 +760,7 @@ namespace
 bool McpInterceptRequest(PlayerTypes eFrom, PlayerTypes eTo, DiploUIStateTypes eState, const char* szMessage, int iExtraGameData)
 {
 	if(DropForIdleHuman(eTo)) return true;
-	if(!McpIsSeat(eTo)) return false;
+	if(!McpPlayedByModel(eTo)) return false;
 	Record(eTo, eFrom, eState, szMessage, iExtraGameData, NULL);
 	return true;
 }
@@ -768,7 +768,7 @@ bool McpInterceptRequest(PlayerTypes eFrom, PlayerTypes eTo, DiploUIStateTypes e
 bool McpInterceptDealRequest(PlayerTypes eFrom, PlayerTypes eTo, const CvDeal* pDeal, DiploUIStateTypes eState, const char* szMessage)
 {
 	if(DropForIdleHuman(eTo)) return true;
-	if(!McpIsSeat(eTo)) return false;
+	if(!McpPlayedByModel(eTo)) return false;
 	Record(eTo, eFrom, eState, szMessage, -1, pDeal);
 	return true;
 }

@@ -67,6 +67,14 @@ namespace
 std::string McpDescribePopup(PlayerTypes ePlayer, int iType, int iData1, int iData2, int iData3, bool bOption1, const std::string& text)
 {
 	if(iType == MCP_POPUP_TEXT) return text;
+	if(iType == MCP_POPUP_LEADER_MESSAGE)
+	{
+		PlayerTypes eLeader = (PlayerTypes)iData1;
+		std::string who = (eLeader >= 0 && eLeader < MAX_CIV_PLAYERS) ? CivName(eLeader) : "Another civilization";
+		std::string s = text.empty() ? who + "'s leader spoke to you" : who + "'s leader says: " + text;
+		if(iData2 == DIPLO_UI_STATE_AI_DECLARED_WAR) s += " (they have declared war on you)";
+		return s;
+	}
 	switch(iType)
 	{
 	case BUTTONPOPUP_GOODY_HUT_REWARD:

@@ -323,6 +323,70 @@ local function OnGamePopup(popupInfo)
 end
 Events.SerialEventGameMessagePopup.Add(OnGamePopup);
 
+-- A leader screen holds the game until someone leaves it, which a model playing the civilization on screen
+-- cannot do: the plugin passes the leader's words to the model, and the screen is left here, the way its
+-- own Back button does, once it shows. The game hides this window's update while a leader screen is up,
+-- so the watch runs on the application's frames. A conversation the human opens, by clicking a leader or a
+-- spy notification, stays theirs until the leader view closes or the next turn starts; the AI answers a
+-- model's discuss with DISCUSS_HUMAN_INVOKED too, so that state does not mark the human.
+local LEADER_SCREENS = { "/LeaderHeadRoot/DiscussionDialog", "/LeaderHeadRoot" };
+local HUMAN_OPENED = {
+	[DiploUIStateTypes.DIPLO_UI_STATE_DEFAULT_ROOT] = true,
+	[DiploUIStateTypes.DIPLO_UI_STATE_CONFRONT_YOU_KILLED_MY_SPY] = true,
+};
+local LEADER_WATCH_FRAMES = 300;
+local g_LeaderWatch = 0;
+local g_HumanTalking = false;
+
+local function OnLeaderMessage(iPlayer, iDiploUIState, szLeaderMessage)
+	if g_Stopped then
+		return;
+	end
+	if HUMAN_OPENED[iDiploUIState] then
+		g_HumanTalking = true;
+	end
+	if g_HumanTalking then
+		g_LeaderWatch = 0;
+		return;
+	end
+	if Game.LLMTakeLeaderMessage(iPlayer, iDiploUIState, szLeaderMessage or "", Game.GetActivePlayer()) then
+		g_LeaderWatch = LEADER_WATCH_FRAMES;
+	end
+end
+Events.AILeaderMessage.Add(OnLeaderMessage);
+
+-- The turn start is for a human-opened screen that never entered the leader view.
+local function OnHumanDoneTalking()
+	g_HumanTalking = false;
+end
+Events.LeavingLeaderViewMode.Add(OnHumanDoneTalking);
+Events.ActivePlayerTurnStart.Add(OnHumanDoneTalking);
+
+local function LeaveLeaderScreens()
+	if g_LeaderWatch <= 0 then
+		return;
+	end
+	if g_Stopped or g_HumanTalking then
+		g_LeaderWatch = 0;
+		return;
+	end
+	g_LeaderWatch = g_LeaderWatch - 1;
+	local left = false;
+	for _, path in ipairs(LEADER_SCREENS) do
+		local control = ContextPtr:LookUpControl(path);
+		if control ~= nil and not control:IsHidden() then
+			UIManager:DequeuePopup(control);
+			left = true;
+		end
+	end
+	if left then
+		UI.SetLeaderHeadRootUp(false);
+		UI.RequestLeaveLeader();
+		print("LLMLog: left the leader screen for the model playing this civilization");
+	end
+end
+Events.LocalMachineAppUpdate.Add(LeaveLeaderScreens);
+
 local function CollectAcknowledged()
 	local names = Game.LLMDialogsToClose();
 	if names == nil or names == "" then

@@ -2,6 +2,7 @@
 #include "CivPluginApi.h"
 #include "McpLua.h"
 #include "McpBridge.h"
+#include "McpPopups.h"
 #include "McpSeat.h"
 #include "CvGame.h"
 #include "CvPlayer.h"
@@ -90,6 +91,20 @@ namespace
 		return 0;
 	}
 
+	//bool LLMTakeLeaderMessage(int player, int diploUIState, string text, int activePlayer); true when a model plays the
+	// civilization on screen: the leader's words become its game message, and the caller closes the leader screen.
+	int lLLMTakeLeaderMessage(lua_State* L)
+	{
+		const bool bTaken = McpBridge::Get().ScreenPlayed();
+		if(bTaken)
+		{
+			const char* szText = lua_tostring(L, 3);
+			McpBridge::Get().NotePopup(lua_tointeger(L, 4), MCP_POPUP_LEADER_MESSAGE, lua_tointeger(L, 1), lua_tointeger(L, 2), 0, false, szText ? szText : "", false);
+		}
+		lua_pushboolean(L, bTaken);
+		return 1;
+	}
+
 	//string LLMDialogsToClose();
 	int lLLMDialogsToClose(lua_State* L)
 	{
@@ -154,6 +169,7 @@ void McpAddGameMethods(const CivHostInfo* host, lua_State* L)
 	AddMethod(host, L, "GetLLMLog", &lGetLLMLog);
 	AddMethod(host, L, "GetLLMIdentity", &lGetLLMIdentity);
 	AddMethod(host, L, "LLMNotePopup", &lLLMNotePopup);
+	AddMethod(host, L, "LLMTakeLeaderMessage", &lLLMTakeLeaderMessage);
 	AddMethod(host, L, "LLMSetActiveMods", &lLLMSetActiveMods);
 	AddMethod(host, L, "LLMDialogsToClose", &lLLMDialogsToClose);
 	AddMethod(host, L, "GetLLMTeammates", &lGetLLMTeammates);

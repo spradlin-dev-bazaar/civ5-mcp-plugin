@@ -482,6 +482,24 @@ def turn_150_status(c):
         "production: a city needs a production choice" in s["end_turn_blocking"],
         s["end_turn_blocking"],
     )
+    denmark = s["your_civilization"]
+    c.equal(
+        "the first status names Denmark's leader, unique ability and unique units",
+        (denmark["leader"], [a["name"] for a in denmark["unique_ability"]], denmark["unique_units"]),
+        (
+            "Harald Bluetooth",
+            ["Viking Fury"],
+            [
+                {"unit": "Berserker (UNIT_DANISH_BERSERKER)", "replaces": "Longswordsman (UNIT_LONGSWORDSMAN)"},
+                {"unit": "Norwegian Ski Infantry (UNIT_DANISH_SKI_INFANTRY)", "replaces": "Rifleman (UNIT_RIFLEMAN)"},
+            ],
+        ),
+    )
+    c.check(
+        "the unique ability's effect is plain text",
+        all(a["effect"] and "[" not in a["effect"] and "TXT_KEY" not in a["effect"] for a in denmark["unique_ability"]),
+        denmark["unique_ability"],
+    )
 
 
 def spies_religion_and_neighbours(c):
@@ -569,6 +587,12 @@ def works_and_the_empire(c):
 def research_and_policies(c):
     research = c.answers("research_options", "research_options")
     c.equal("research_options: the technology being researched", research["research"]["type"], "TECH_GUNPOWDER")
+    gunpowder = [t for t in research["available"] if t["type"] == "TECH_GUNPOWDER"]
+    c.equal(
+        "research_options: Gunpowder leads to Chemistry and Metallurgy",
+        sorted(gunpowder[0].get("leads_to", [])) if gunpowder else None,
+        ["Chemistry (TECH_CHEMISTRY)", "Metallurgy (TECH_METALLURGY)"],
+    )
     policies = c.answers("policy_options", "policy_options")
     c.equal(
         "policy_options: culture, the next policy's cost, and whether one can be adopted",
@@ -576,8 +600,10 @@ def research_and_policies(c):
         (537, 690, False),
     )
     c.equal("archaeology: no dig waiting", c.answers("archaeology", "archaeology")["digs_waiting"], 0)
-    lookup = c.answers("lookup TECH_GUNPOWDER", "lookup", type="TECH_GUNPOWDER")
-    c.check("lookup names the technology", "Gunpowder" in json.dumps(lookup), json.dumps(lookup)[:200])
+    gunpowder_lookup = c.answers("lookup TECH_GUNPOWDER", "lookup", type="TECH_GUNPOWDER")
+    c.check(
+        "lookup names the technology", "Gunpowder" in json.dumps(gunpowder_lookup), json.dumps(gunpowder_lookup)[:200]
+    )
     unlocks = c.answers("lookup TECH_MASONRY", "lookup", type="TECH_MASONRY")["tech"]["unlocks"]
     builds = [u for u in unlocks if u.startswith("worker build: ")]
     c.check(
@@ -605,14 +631,227 @@ def research_and_policies(c):
         c.answers(tool, tool)
 
 
+def lookup(c, key, kind):
+    return c.answers("lookup " + key, "lookup", type=key)[kind]
+
+
+def queued(research):
+    """The research queue in order: the current technology, then the rest."""
+    return [research.get("current")] + [q["tech"] for q in research.get("queued_after", [])]
+
+
+def game_rules(c):
+    """Expected values come from the game's own database (Brave New World), not from memory. Denmark holds the seat, so
+    costs are this game's (Quick pace) and upgrades are Denmark's own units."""
+    c.equal(
+        "lookup: Currency requires Mathematics",
+        lookup(c, "TECH_CURRENCY", "tech").get("requires"),
+        ["Mathematics (TECH_MATHEMATICS)"],
+    )
+    carolean = lookup(c, "UNIT_SWEDISH_CAROLEAN", "unit")
+    c.equal(
+        "lookup: the Carolean's unit type, upgrade, obsolete tech, free promotion, and the unit it replaces for Sweden",
+        tuple(
+            carolean.get(k)
+            for k in ("unit_type", "upgrades_to", "obsolete_with", "free_promotions", "unique_to", "replaces")
+        ),
+        (
+            "Gunpowder Units",
+            ["Great War Infantry (UNIT_GREAT_WAR_INFANTRY)"],
+            "Replaceable Parts (TECH_REPLACEABLE_PARTS)",
+            ["March (PROMOTION_MARCH)"],
+            "Sweden (CIVILIZATION_SWEDEN)",
+            "Rifleman (UNIT_RIFLEMAN)",
+        ),
+    )
+    c.equal(
+        "lookup: Denmark's Swordsman upgrades to Denmark's Berserker, and Rome's Legion to Rome's Longswordsman",
+        (
+            lookup(c, "UNIT_SWORDSMAN", "unit").get("upgrades_to"),
+            lookup(c, "UNIT_ROMAN_LEGION", "unit").get("upgrades_to"),
+        ),
+        (["Berserker (UNIT_DANISH_BERSERKER)"], ["Longswordsman (UNIT_LONGSWORDSMAN)"]),
+    )
+    gunpowder = lookup(c, "TECH_GUNPOWDER", "tech")
+    tree = game_lua("print(Players[%d]:GetResearchCost(GameInfoTypes.TECH_GUNPOWDER))" % DENMARK)
+    c.equal(
+        "lookup gives Gunpowder's cost for Denmark in this game, as the tech tree shows it",
+        (gunpowder.get("cost"), gunpowder.get("costs")),
+        (int(tree[0]) if tree else None, "this game's, for your civilization"),
+    )
+    courthouse = lookup(c, "BUILDING_COURTHOUSE", "building")
+    c.equal(
+        "lookup: a Courthouse costs 4 gold a turn and needs Mathematics",
+        (courthouse.get("upkeep"), courthouse.get("requires_tech")),
+        (4, "Mathematics (TECH_MATHEMATICS)"),
+    )
+    university = lookup(c, "BUILDING_UNIVERSITY", "building")
+    c.equal(
+        "lookup: a University's upkeep, science bonus, scientist slots and the Library it needs",
+        (
+            university.get("upkeep"),
+            university.get("yield_percent"),
+            university.get("specialist_slots", {}).get("slots"),
+            university.get("needs_in_city"),
+        ),
+        (2, {"science": 33}, 2, ["Library (BUILDING_LIBRARY)"]),
+    )
+    c.equal(
+        "lookup: a Library gives half a science per citizen",
+        lookup(c, "BUILDING_LIBRARY", "building").get("yields_per_citizen"),
+        {"science": 0.5},
+    )
+    general = lookup(c, "UNIT_GREAT_GENERAL", "unit")
+    c.check(
+        "lookup: a Great General has no production cost to show",
+        "production_cost" not in general and "costs" not in general,
+        general,
+    )
+    walls = lookup(c, "BUILDING_WALLS", "building")
+    c.equal("lookup: Walls add 5 defense and 50 hit points", (walls.get("defense"), walls.get("hit_points")), (5, 50))
+    c.equal(
+        "lookup: a Factory needs a Coal",
+        lookup(c, "BUILDING_FACTORY", "building").get("needs_resources"),
+        {"Coal (RESOURCE_COAL)": 1},
+    )
+    library = lookup(c, "BUILDING_GREAT_LIBRARY", "building")
+    c.equal(
+        "lookup: the Great Library is a world wonder that gives a Great Scientist point",
+        (library.get("wonder"), library.get("great_person"), library.get("great_person_points")),
+        ("world", "Great Scientist (UNIT_SCIENTIST)", 1),
+    )
+    c.equal(
+        "lookup: the Great Wall goes obsolete with Dynamite",
+        lookup(c, "BUILDING_GREAT_WALL", "building").get("obsolete_with"),
+        "Dynamite (TECH_DYNAMITE)",
+    )
+    c.equal(
+        "lookup: the Palace is a national wonder and the Writers' Guild is not a wonder",
+        (
+            lookup(c, "BUILDING_PALACE", "building").get("wonder"),
+            lookup(c, "BUILDING_WRITERS_GUILD", "building").get("wonder"),
+        ),
+        ("national", None),
+    )
+    farm = lookup(c, "IMPROVEMENT_FARM", "improvement")
+    c.equal(
+        "lookup: a Farm's food, its tech, and the techs that add food with and without fresh water",
+        tuple(
+            farm.get(k)
+            for k in ("yields", "requires_tech", "tech_bonuses_with_fresh_water", "tech_bonuses_without_fresh_water")
+        ),
+        (
+            {"food": 1},
+            "Agriculture (TECH_AGRICULTURE)",
+            {"Civil Service (TECH_CIVIL_SERVICE)": {"food": 1}},
+            {"Fertilizer (TECH_FERTILIZER)": {"food": 1}},
+        ),
+    )
+    c.equal(
+        "lookup: the Polder is the Netherlands' own improvement",
+        lookup(c, "IMPROVEMENT_POLDER", "improvement").get("unique_to"),
+        "The Netherlands (CIVILIZATION_NETHERLANDS)",
+    )
+    iron = lookup(c, "RESOURCE_IRON", "resource")
+    c.equal(
+        "lookup: Iron is strategic, revealed by Bronze Working, gives production, and a Mine connects it",
+        (
+            iron.get("kind"),
+            iron.get("revealed_by"),
+            iron.get("yields"),
+            "Mine (IMPROVEMENT_MINE)" in iron.get("connected_by", []),
+        ),
+        ("strategic", "Bronze Working (TECH_BRONZE_WORKING)", {"production": 1}, True),
+    )
+    shock = lookup(c, "PROMOTION_SHOCK_2", "promotion")
+    c.equal(
+        "lookup: Shock II needs Shock I, for melee, mounted, gunpowder and armored units",
+        (shock.get("requires_one_of"), sorted(shock.get("unit_types", []))),
+        (["Shock I (PROMOTION_SHOCK_1)"], ["Armored Units", "Gunpowder Units", "Melee Units", "Mounted Units"]),
+    )
+    representation = lookup(c, "POLICY_REPRESENTATION", "policy")
+    c.equal(
+        "lookup: Representation is a Liberty policy that requires Citizenship",
+        (representation.get("branch"), representation.get("requires")),
+        ("Liberty (POLICY_BRANCH_LIBERTY)", ["Citizenship (POLICY_CITIZENSHIP)"]),
+    )
+    c.equal(
+        "lookup: God of the Sea is a pantheon belief", lookup(c, "BELIEF_GOD_SEA", "belief").get("kind"), "pantheon"
+    )
+    grass = lookup(c, "TERRAIN_GRASS", "terrain")
+    forest = lookup(c, "FEATURE_FOREST", "feature")
+    c.equal(
+        "lookup: grassland's and forest's yields, movement cost and defense, and a forest replacing the grassland's yields",
+        (
+            grass.get("yields"),
+            grass.get("movement_cost"),
+            forest.get("yields"),
+            forest.get("replaces_terrain_yields"),
+            forest.get("movement_cost"),
+            forest.get("defense_percent"),
+        ),
+        ({"food": 2}, 1, {"food": 1, "production": 1}, True, 2, 25),
+    )
+    scientist = lookup(c, "SPECIALIST_SCIENTIST", "specialist")
+    c.equal(
+        "lookup: a Scientist's science and Great Scientist points",
+        (scientist.get("yields"), scientist.get("great_person_points"), scientist.get("great_person")),
+        ({"science": 3}, 3, "Great Scientist (UNIT_SCIENTIST)"),
+    )
+    manhattan = lookup(c, "PROJECT_MANHATTAN_PROJECT", "project")
+    c.equal(
+        "lookup: the Manhattan Project's cost at Quick pace, and its tech",
+        (manhattan.get("production_cost"), manhattan.get("requires_tech")),
+        (502, "Atomic Theory (TECH_ATOMIC_THEORY)"),
+    )
+    sweden = lookup(c, "CIVILIZATION_SWEDEN", "civilization")
+    c.check(
+        "lookup: Sweden's unique units include the Carolean, in place of the Rifleman",
+        {"unit": "Carolean (UNIT_SWEDISH_CAROLEAN)", "replaces": "Rifleman (UNIT_RIFLEMAN)"}
+        in sweden.get("unique_units", []),
+        sweden.get("unique_units"),
+    )
+    c.equal(
+        "lookup: Songhai's Mud Pyramid Mosque replaces the Temple",
+        lookup(c, "CIVILIZATION_SONGHAI", "civilization").get("unique_buildings"),
+        [{"building": "Mud Pyramid Mosque (BUILDING_MUD_PYRAMID_MOSQUE)", "replaces": "Temple (BUILDING_TEMPLE)"}],
+    )
+    rules = lookup(c, "RULES", "game_rules")["rules"]
+    c.equal(
+        "lookup RULES: city spacing, food per citizen, occupied cities' unhappiness, and city-state influence",
+        tuple(
+            rules.get(k)
+            for k in (
+                "no_new_city_within_tiles",
+                "food_eaten_per_citizen",
+                "unhappiness_per_occupied_citizen",
+                "city_state_friends_at_influence",
+                "city_state_allies_at_influence",
+                "city_state_influence_change_per_turn_above_resting_point",
+                "unit_heal_per_turn_in_a_city",
+                "city_hit_points_healed_per_turn",
+            )
+        ),
+        (3, 2, 1.34, 30, 60, -1, 25, 20),
+    )
+    c.refuses("lookup refuses a kind of key it does not know", "lookup", "unsupported key", type="WONDER_PYRAMIDS")
+
+
 def every_unit_city_and_civ(c):
     units = c.answers("units", "units")["units"]
     c.equal("units lists Denmark's units", len(units), 15)
     for unit in units:
         c.answers("unit_options for %s %d" % (unit["name"], unit["id"]), "unit_options", unit_id=unit["id"])
+    options = {}
     for city in (COPENHAGEN, AARHUS, KAUPANG):
-        c.answers("city_options for city %d" % city, "city_options", city_id=city)
+        options[city] = c.answers("city_options for city %d" % city, "city_options", city_id=city)
         c.answers("city_citizens for city %d" % city, "city_citizens", city_id=city)
+    buildings = options[COPENHAGEN]["buildings"]
+    c.check(
+        "city_options: Copenhagen's buildings show their upkeep and effect",
+        any("upkeep" in b and "help" in b for b in buildings),
+        [b["type"] for b in buildings],
+    )
     for civ in ("Spain", "Songhai", "India", "Russia", "Poland"):
         c.answers("deal_options with %s" % civ, "deal_options", civ=civ)
 
@@ -738,6 +977,12 @@ def turn_151(c):
 def seats(c):
     taken = c.answers("take_seat India", "take_seat", civ="India")
     c.equal("the session now plays India", taken["playing"], "India")
+    india = taken.get("your_civilization", {})
+    c.equal(
+        "take_seat gives the claimed civilization's leader and unique building",
+        (india.get("leader"), india.get("unique_buildings")),
+        ("Gandhi", [{"building": "Mughal Fort (BUILDING_MUGHAL_FORT)", "replaces": "Castle (BUILDING_CASTLE)"}]),
+    )
     c.answers("chat to the teammate on screen", "chat", text="mcp_checks: India here.")
     c.answers("testing_mode on", "testing_mode", enabled=True)
     c.answers("skip_human_turn ends Denmark's turn", "skip_human_turn")
@@ -940,8 +1185,55 @@ def turn_156(c):
         (upgraded["unit"]["type"], upgraded["unit"]["id"], upgraded["gold_spent"]),
         ("UNIT_MUSKETMAN", MUSKETMAN, 50),
     )
+    c.refuses("set_research a known technology", "set_research", "you already know Gunpowder", tech="TECH_GUNPOWDER")
+    before = c.answers("research_options before a preview", "research_options")["research"]
+    preview = c.answers("set_research Rifling, preview only", "set_research", tech="TECH_RIFLING", preview_only=True)
+    would_be = preview.get("research_would_be", {})
+    tree = game_lua(
+        "for _, t in ipairs({'TECH_ECONOMICS', 'TECH_METALLURGY', 'TECH_RIFLING'}) do"
+        " print(Players[%d]:GetResearchTurnsLeft(GameInfoTypes[t], true)) end" % DENMARK
+    )
+    c.equal(
+        "a preview shows the path to Rifling, with each queued technology's turns as the tech tree shows them",
+        (queued(would_be), [q.get("turns") for q in would_be.get("queued_after", [])]),
+        (["Printing Press", "Economics", "Metallurgy", "Rifling"], [int(t) for t in tree]),
+    )
+    after = c.answers("research_options after a preview", "research_options")["research"]
+    c.equal("the preview changed nothing", after, before)
+    # Changes the game in an old step, against the README's rule: setting Printing Press below leaves research as before.
+    far = c.answers("set_research Rifling, further down the tree", "set_research", tech="TECH_RIFLING")["research"]
+    c.equal(
+        "set_research queues the path to Rifling", queued(far), ["Printing Press", "Economics", "Metallurgy", "Rifling"]
+    )
+    c.answers(
+        "set_research Printing Press, preview only", "set_research", tech="TECH_PRINTING_PRESS", preview_only=True
+    )
+    c.equal(
+        "a preview leaves the queue to Rifling as it was",
+        queued(c.answers("research_options after a second preview", "research_options")["research"]),
+        ["Printing Press", "Economics", "Metallurgy", "Rifling"],
+    )
+    c.answers("set_research Metallurgy", "set_research", tech="TECH_METALLURGY")
+    added = c.answers("set_research adds Rifling", "set_research", tech="TECH_RIFLING", add_to_queue=True)["research"]
+    c.equal(
+        "add_to_queue puts Rifling, and Economics it still needs, after Metallurgy",
+        queued(added),
+        ["Printing Press", "Metallurgy", "Economics", "Rifling"],
+    )
+    c.refuses(
+        "add_to_queue a technology already queued",
+        "set_research",
+        "already in your research queue",
+        tech="TECH_ECONOMICS",
+        add_to_queue=True,
+    )
     research = c.answers("set_research Printing Press", "set_research", tech="TECH_PRINTING_PRESS")
     c.equal("Printing Press is researched", research["research"]["current"], "Printing Press")
+    c.check(
+        "choosing Printing Press, already queued, clears the rest of the queue",
+        "queued_after" not in research["research"],
+        research,
+    )
     c.refuses(
         "attack from too far away",
         "attack",
@@ -2010,6 +2302,7 @@ SCENARIO = [
     spies_religion_and_neighbours,
     works_and_the_empire,
     research_and_policies,
+    game_rules,
     every_unit_city_and_civ,
     deal_preview,
     refusals,
@@ -2052,6 +2345,7 @@ READ_ONLY = {
     spies_religion_and_neighbours,
     works_and_the_empire,
     research_and_policies,
+    game_rules,
     every_unit_city_and_civ,
     deal_preview,
 }

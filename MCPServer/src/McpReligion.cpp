@@ -18,7 +18,7 @@ using namespace McpTool;
 
 // Religion and the great-person choices the game otherwise asks for on screen.
 
-namespace
+namespace McpTool
 {
 	JVal BeliefJson(BeliefTypes e)
 	{
@@ -30,13 +30,6 @@ namespace
 		return JVal(o);
 	}
 
-	JArr BeliefsJson(const std::vector<BeliefTypes>& v)
-	{
-		JArr a;
-		for(size_t i = 0; i < v.size(); ++i) a.push_back(BeliefJson(v[i]));
-		return a;
-	}
-
 	BeliefTypes FindBelief(const std::string& key)
 	{
 		if(key.empty()) return NO_BELIEF;
@@ -46,6 +39,16 @@ namespace
 			if(b && MatchesKey(b->GetType(), Localized(b->getShortDescription()).c_str(), key)) return (BeliefTypes)i;
 		}
 		return NO_BELIEF;
+	}
+}
+
+namespace
+{
+	JArr BeliefsJson(const std::vector<BeliefTypes>& v)
+	{
+		JArr a;
+		for(size_t i = 0; i < v.size(); ++i) a.push_back(BeliefJson(v[i]));
+		return a;
 	}
 
 	ReligionTypes FindReligion(const std::string& key)

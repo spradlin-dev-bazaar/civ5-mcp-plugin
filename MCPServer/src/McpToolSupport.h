@@ -102,6 +102,15 @@ namespace McpTool
 	ResourceTypes FindResourceType(const std::string& key);
 	ProjectTypes FindProjectType(const std::string& key);
 	ProcessTypes FindProcessType(const std::string& key);
+	TerrainTypes FindTerrainType(const std::string& key);
+	FeatureTypes FindFeatureType(const std::string& key);
+	SpecialistTypes FindSpecialistType(const std::string& key);
+	CivilizationTypes FindCivilizationType(const std::string& key);
+
+	// McpReligion.cpp and McpCulture.cpp.
+	JVal BeliefJson(BeliefTypes e);
+	BeliefTypes FindBelief(const std::string& key);
+	const char* SlotTypeName(GreatWorkSlotType e);
 
 	// McpRefusals.cpp: why the game refuses something, in words; "" when it does not refuse.
 	std::string TrainRefusal(CvCity* c, UnitTypes eUnit, bool bWillPurchase);

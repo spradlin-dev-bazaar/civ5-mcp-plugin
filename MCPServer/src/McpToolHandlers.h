@@ -35,6 +35,8 @@ MCP_TOOL(ToolTestingMode);
 // McpBriefing.cpp
 MCP_TOOL(ToolBriefing);
 MCP_TOOL(ToolCivs);
+
+// McpRules.cpp
 MCP_TOOL(ToolLookup);
 
 // McpActions.cpp

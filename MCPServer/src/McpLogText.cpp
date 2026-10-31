@@ -201,7 +201,9 @@ std::string McpDescribeCall(const McpToolDef& tool, const JObj& args)
 	if(name == "upgrade_unit") return UnitText(args) + ": upgrade";
 	if(name == "set_production") return CityText(args, "city_id") + ": produce " + TypeName(ArgStr(args, "item")) + (ArgBool(args, "append", false) ? " (added to the queue)" : "");
 	if(name == "buy") return CityText(args, "city_id") + ": buy " + TypeName(ArgStr(args, "item")) + (ArgBool(args, "with_faith", false) ? " with faith" : "");
-	if(name == "set_research") return "Research " + TypeName(ArgStr(args, "tech"));
+	if(name == "set_research")
+		return std::string(ArgBool(args, "add_to_queue", false) ? "Queue research " : "Research ") + TypeName(ArgStr(args, "tech")) +
+		       (ArgBool(args, "preview_only", false) ? " (preview only)" : "");
 	if(name == "adopt_policy") return "Adopt " + TypeName(ArgStr(args, "policy"));
 	if(name == MCP_TOOL_END_TURN)
 	{

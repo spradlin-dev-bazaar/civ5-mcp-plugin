@@ -363,6 +363,42 @@ namespace McpTool
 		}
 		return NO_PROJECT;
 	}
+	TerrainTypes FindTerrainType(const std::string& key)
+	{
+		for(int i = 0; i < GC.getNumTerrainInfos(); ++i)
+		{
+			CvTerrainInfo* info = GC.getTerrainInfo((TerrainTypes)i);
+			if(info && MatchesKey(info->GetType(), info->GetDescription(), key)) return (TerrainTypes)i;
+		}
+		return NO_TERRAIN;
+	}
+	FeatureTypes FindFeatureType(const std::string& key)
+	{
+		for(int i = 0; i < GC.getNumFeatureInfos(); ++i)
+		{
+			CvFeatureInfo* info = GC.getFeatureInfo((FeatureTypes)i);
+			if(info && MatchesKey(info->GetType(), info->GetDescription(), key)) return (FeatureTypes)i;
+		}
+		return NO_FEATURE;
+	}
+	SpecialistTypes FindSpecialistType(const std::string& key)
+	{
+		for(int i = 0; i < GC.getNumSpecialistInfos(); ++i)
+		{
+			CvSpecialistInfo* info = GC.getSpecialistInfo((SpecialistTypes)i);
+			if(info && MatchesKey(info->GetType(), info->GetDescription(), key)) return (SpecialistTypes)i;
+		}
+		return NO_SPECIALIST;
+	}
+	CivilizationTypes FindCivilizationType(const std::string& key)
+	{
+		for(int i = 0; i < GC.getNumCivilizationInfos(); ++i)
+		{
+			CvCivilizationInfo* info = GC.getCivilizationInfo((CivilizationTypes)i);
+			if(info && MatchesKey(info->GetType(), Localized(info->getShortDescriptionKey()).c_str(), key)) return (CivilizationTypes)i;
+		}
+		return NO_CIVILIZATION;
+	}
 
 	bool MatchesKey(const char* szType, const char* szDescription, const std::string& key)
 	{
@@ -929,6 +965,12 @@ namespace McpTool
 		return JVal(o);
 	}
 
+	// With no science the game's turn count is INT_MAX; leave it out rather than show that.
+	static void PutTurns(JObj& o, const char* k, int iTurns)
+	{
+		if(iTurns != INT_MAX) o[k] = J(iTurns);
+	}
+
 	JVal ResearchJson(CvPlayer* me)
 	{
 		JObj r;
@@ -939,12 +981,21 @@ namespace McpTool
 			r["current"] = J("none - choose one with set_research");
 			return JVal(r);
 		}
-		CvTeamTechs* pTeamTechs = GET_TEAM(me->getTeam()).GetTeamTechs();
 		r["current"] = J(TechName(eTech));
 		r["type"] = J(GC.getTechInfo(eTech)->GetType());
-		r["progress"] = J(pTeamTechs->GetResearchProgress(eTech));
-		r["cost"] = J(pTeamTechs->GetResearchCost(eTech));
-		r["turns_left"] = J(me->GetPlayerTechs()->GetResearchTurnsLeft(eTech, true));
+		r["progress"] = J(me->GetPlayerTechs()->GetResearchProgress(eTech));
+		r["cost"] = J(me->GetPlayerTechs()->GetResearchCost(eTech));
+		PutTurns(r, "turns_left", me->GetPlayerTechs()->GetResearchTurnsLeft(eTech, true));
+		JArr queue;
+		for(const CLLNode<TechTypes>* n = me->headResearchQueueNode(); n; n = me->nextResearchQueueNode(n))
+		{
+			if(n->m_data == eTech) continue;
+			JObj q;
+			q["tech"] = J(TechName(n->m_data));
+			PutTurns(q, "turns", me->GetPlayerTechs()->GetResearchTurnsLeft(n->m_data, true));
+			queue.push_back(JVal(q));
+		}
+		if(!queue.empty()) r["queued_after"] = JVal(queue);
 		return JVal(r);
 	}
 

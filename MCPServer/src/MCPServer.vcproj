@@ -167,6 +167,14 @@
 			>
 		</File>
 		<File
+			RelativePath=".\McpRules.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\McpRules.h"
+			>
+		</File>
+		<File
 			RelativePath=".\McpSeat.cpp"
 			>
 		</File>

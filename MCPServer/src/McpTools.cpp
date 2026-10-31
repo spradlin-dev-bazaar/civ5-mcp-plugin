@@ -1,6 +1,7 @@
 #include "CvGameCoreDLLPCH.h"
 #include "McpTools.h"
 #include "McpToolSupport.h"
+#include "McpRules.h"
 #include "McpSeat.h"
 #include "McpLogText.h"
 #include "McpToolHandlers.h"
@@ -225,7 +226,8 @@ MCP_TOOL(ToolStatus)
 		o["game_settings"] = ToolGameSettings(JObj(), ignored);
 		JVal modsDetail = ToolMods(JObj(), ignored);
 		o["mods"] = modsDetail.get<JObj>()["mods"];
-		o["remember"] = J("store game_settings and mods with your memories for this game_id; they come once per connection and per loaded game");
+		o["your_civilization"] = CivilizationRules(me->getCivilizationType(), me->getLeaderType());
+		o["remember"] = J("store game_settings, mods and your_civilization with your memories for this game_id; they come once per connection and per loaded game");
 	}
 	return JVal(o);
 }
@@ -476,6 +478,7 @@ MCP_TOOL(ToolCityOptions)
 		}
 		if(bBuy) b["buy_gold"] = J(c->GetPurchaseCost(e));
 		if(bBuyFaith) b["buy_faith"] = J(c->GetFaithPurchaseCost(e));
+		PutBuildingRules(b, e, me);
 		buildings.push_back(JVal(b));
 	}
 	o["buildings"] = JVal(buildings);
@@ -580,9 +583,11 @@ MCP_TOOL(ToolResearchOptions)
 		t["type"] = J(info->GetType());
 		t["name"] = J(info->GetDescription());
 		t["era"] = J(EraName((EraTypes)info->GetEra()));
-		t["cost"] = J(GET_TEAM(me->getTeam()).GetTeamTechs()->GetResearchCost(e));
+		t["cost"] = J(me->GetPlayerTechs()->GetResearchCost(e));
 		t["turns"] = J(me->GetPlayerTechs()->GetResearchTurnsLeft(e, true));
 		t["help"] = J(Localized(info->GetHelp()));
+		JArr leadsTo = TechLeadsTo(e);
+		if(!leadsTo.empty()) t["leads_to"] = JVal(leadsTo);
 		techs.push_back(JVal(t));
 	}
 	o["available"] = JVal(techs);
@@ -857,20 +862,39 @@ MCP_TOOL(ToolSetResearch)
 	std::string key = ArgStr(args, "tech");
 	TechTypes eTech = FindTechType(key);
 	if(eTech == NO_TECH) { err = "unknown tech '" + key + "'; use a name or type from research_options"; return JVal(); }
+	bool bAdd = ArgBool(args, "add_to_queue", false);
+	bool bPreview = ArgBool(args, "preview_only", false);
 	JObj o;
 	if(me->GetNumFreeTechs() > 0)
 	{
+		if(bAdd || bPreview) { err = "claim your free technology first: set_research without add_to_queue or preview_only grants it"; return JVal(); }
 		if(!me->GetPlayerTechs()->CanResearchForFree(eTech)) { err = "that technology cannot be taken as the free one (prerequisites missing or already known)"; return JVal(); }
-		if(me->GetPlayerTechs()->GetCurrentResearch() == eTech) me->clearResearchQueue();
 		GET_TEAM(me->getTeam()).setHasTech(eTech, true, me->GetID(), true, true);
 		me->SetNumFreeTechs(me->GetNumFreeTechs() - 1);
 		o["free_tech_claimed"] = J(TechName(eTech));
 	}
 	else
 	{
-		if(!me->GetPlayerTechs()->CanResearch(eTech)) { err = "cannot research " + key + " now (prerequisites missing or already known)"; return JVal(); }
-		me->clearResearchQueue();
-		me->pushResearch(eTech, true);
+		if(GET_TEAM(me->getTeam()).GetTeamTechs()->HasTech(eTech)) { err = std::string("you already know ") + TechName(eTech); return JVal(); }
+		if(!me->GetPlayerTechs()->CanEverResearch(eTech)) { err = std::string("your civilization can never research ") + TechName(eTech); return JVal(); }
+		if(bAdd && me->GetPlayerTechs()->IsResearchingTech(eTech)) { err = std::string(TechName(eTech)) + " is already in your research queue"; return JVal(); }
+		std::vector<TechTypes> previous;
+		for(const CLLNode<TechTypes>* n = me->headResearchQueueNode(); n; n = me->nextResearchQueueNode(n)) previous.push_back(n->m_data);
+		// pushResearch returns early, queue untouched, for a tech already queued.
+		if(!bAdd) me->clearResearchQueue();
+		bool bQueued = me->pushResearch(eTech, false);
+		if(bQueued && bPreview) o["research_would_be"] = ResearchJson(me);
+		if(!bQueued || bPreview)
+		{
+			me->clearResearchQueue();
+			for(size_t i = 0; i < previous.size(); ++i) me->pushResearch(previous[i]);
+		}
+		if(!bQueued) { err = std::string("cannot research ") + TechName(eTech) + ": a technology on the way to it can never be researched"; return JVal(); }
+		if(bPreview)
+		{
+			o["previewed_only"] = J(true);
+			return JVal(o);
+		}
 	}
 	o["ok"] = J(true);
 	o["research"] = ResearchJson(me);
@@ -1024,6 +1048,7 @@ MCP_TOOL(ToolTakeSeat)
 	JObj o;
 	o["ok"] = J(true);
 	o["playing"] = J(CivName(e));
+	o["your_civilization"] = CivilizationRules(GET_PLAYER(e).getCivilizationType(), GET_PLAYER(e).getLeaderType());
 	if(!McpOnScreenTeam(e)) o["secret"] = J("you are the human's opponent: never tell them which civilization you play; they will see you once they meet you");
 	o["next"] = J("call wait_for_my_turn; your turn comes after the human's each round");
 	return JVal(o);
@@ -1150,13 +1175,13 @@ namespace
 		  "All your cities: population, growth, production, the buildings each already has, focus and per-turn yields.",
 		  SCHEMA_EMPTY, ToolCities, LOG_NONE, false },
 		{ "city_options",
-		  "Everything one city can build or buy right now: units, buildings and projects with production cost and turns, gold and faith prices, and the tiles it can buy. Use the type strings with set_production or buy.",
+		  "Everything one city can build or buy right now: units, buildings and projects with production cost and turns, gold and faith prices, and the tiles it can buy. Buildings also show their upkeep and effects. Use the type strings with set_production or buy.",
 		  SCHEMA_CITY, ToolCityOptions, LOG_NONE, false },
 		{ "map",
 		  "Explored tiles within radius (default 3, max 8) of a point (default: your capital). Hex grid with offset rows: odd rows sit half a tile east of even rows, so use the dist field rather than computing distances. Unexplored tiles are counted, not listed. Only visible_now tiles show units. Compass: y increases NORTHWARD (y=0 is the south edge) and x increases eastward.",
 		  "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"},\"radius\":{\"type\":\"integer\"}}}", ToolMap, LOG_NONE, false },
 		{ "research_options",
-		  "Technologies you can research now, with cost, turns and what they give.",
+		  "Technologies you can research now, with cost, turns, what they give and what each leads to.",
 		  SCHEMA_EMPTY, ToolResearchOptions, LOG_NONE, false },
 		{ "policy_options",
 		  "Social policy branches and policies: what is unlocked, adoptable now, and what each does; plus your culture and the next policy cost.",
@@ -1174,7 +1199,7 @@ namespace
 		  "Every civilization and city-state you have met: war or peace, their attitude toward you, friendship levels, relative strength, and known capitals.",
 		  SCHEMA_EMPTY, ToolCivs, LOG_NONE, false },
 		{ "lookup",
-		  "The game's own rules text for a type key: TECH_..., UNIT_..., BUILDING_..., POLICY_..., POLICY_BRANCH_..., PROMOTION_..., IMPROVEMENT_..., RESOURCE_... Includes stats and, for a tech, what it unlocks.",
+		  "The rules of the game being played, read from its data tables as the Civilopedia shows them, mods' changes included. Give a type key: TECH_..., UNIT_..., BUILDING_... (wonders too), POLICY_..., POLICY_BRANCH_..., PROMOTION_..., IMPROVEMENT_..., RESOURCE_..., BELIEF_..., CIVILIZATION_..., TERRAIN_..., FEATURE_... (natural wonders too), SPECIALIST_... or PROJECT_..., or RULES for game-wide numbers such as unhappiness per city, heal rates and city-state influence levels. It gives costs, requirements, upgrades, upkeep and yields, and for a tech what it leads to. Once you hold a seat, costs are this game's and units and buildings are your civilization's own versions. Every item it names carries its key.",
 		  "{\"type\":\"object\",\"properties\":{\"type\":{\"type\":\"string\"}},\"required\":[\"type\"]}", ToolLookup, LOG_NONE, false },
 		{ "move_unit",
 		  "Order a unit to move to a tile. Multi-turn moves continue when you end each turn (the unit is still in place when your next turn opens); do not re-issue them. Fails with a reason if there is no path. preview_only=true shows the path and turns without moving. To attack, use attack.",
@@ -1216,8 +1241,8 @@ namespace
 		  "Put a citizen to work as a specialist in a building (type from city_citizens.specialists), or take one out with remove=true.",
 		  "{\"type\":\"object\",\"properties\":{\"city_id\":{\"type\":\"integer\"},\"building\":{\"type\":\"string\"},\"remove\":{\"type\":\"boolean\"}},\"required\":[\"city_id\",\"building\"]}", ToolCitySpecialist, LOG_CITY, false },
 		{ "set_research",
-		  "Choose the technology to research (type string from research_options, e.g. TECH_POTTERY). When you have a free technology to claim, this grants it immediately instead.",
-		  "{\"type\":\"object\",\"properties\":{\"tech\":{\"type\":\"string\"}},\"required\":[\"tech\"]}", ToolSetResearch, LOG_EMPIRE, false },
+		  "Choose the technology to research (type string from research_options, e.g. TECH_POTTERY). A technology further down the tree replaces your queue with the path to it, as clicking it on the tech tree does. add_to_queue=true instead adds it, with any technologies it still needs, to the end of the queue, as a Shift-click does; to reorder the queue, set the first technology, then add the others in the order you want. preview_only=true shows the queue a choice would make without changing anything. research.queued_after lists the queue after the current technology, with the turns each one takes on its own at your current science. When you have a free technology to claim, this grants it immediately instead, but free technologies can only be used for technologies that you are currently able to research immediately (not future techs).",
+		  "{\"type\":\"object\",\"properties\":{\"tech\":{\"type\":\"string\"},\"add_to_queue\":{\"type\":\"boolean\"},\"preview_only\":{\"type\":\"boolean\"}},\"required\":[\"tech\"]}", ToolSetResearch, LOG_EMPIRE, false },
 		{ "adopt_policy",
 		  "Adopt a social policy (POLICY_...) or open a policy branch (POLICY_BRANCH_...) using your culture; see policy_options. Switching to a branch blocked by a rival branch costs a turn of anarchy and needs accept_anarchy=true.",
 		  "{\"type\":\"object\",\"properties\":{\"policy\":{\"type\":\"string\"},\"accept_anarchy\":{\"type\":\"boolean\"}},\"required\":[\"policy\"]}", ToolAdoptPolicy, LOG_EMPIRE, false },

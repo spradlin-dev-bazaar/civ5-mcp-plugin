@@ -18,6 +18,17 @@ using namespace McpTool;
 
 // Ideology, archaeology, great works, trade routes and the spaceship.
 
+namespace McpTool
+{
+	const char* SlotTypeName(GreatWorkSlotType e)
+	{
+		if(e == CvTypes::getGREAT_WORK_SLOT_ART_ARTIFACT()) return "art or artifact";
+		if(e == CvTypes::getGREAT_WORK_SLOT_LITERATURE()) return "writing";
+		if(e == CvTypes::getGREAT_WORK_SLOT_MUSIC()) return "music";
+		return "unknown";
+	}
+}
+
 namespace
 {
 	bool IsIdeology(PolicyBranchTypes e)
@@ -68,14 +79,6 @@ namespace
 		for(size_t i = 0; i < NUM_CONNECTIONS; ++i)
 			if(key == CONNECTIONS[i].name) { out = CONNECTIONS[i].type; return true; }
 		return false;
-	}
-
-	const char* SlotTypeName(GreatWorkSlotType e)
-	{
-		if(e == CvTypes::getGREAT_WORK_SLOT_ART_ARTIFACT()) return "art or artifact";
-		if(e == CvTypes::getGREAT_WORK_SLOT_LITERATURE()) return "writing";
-		if(e == CvTypes::getGREAT_WORK_SLOT_MUSIC()) return "music";
-		return "unknown";
 	}
 
 	// The checks the game's own archaeology prompt makes before offering a choice.
